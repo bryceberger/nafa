@@ -6,4 +6,7 @@ authors.workspace = true
 
 [dependencies]
 eyre.workspace = true
+ftdi = { version = "0.1.3", features = ["vendored"] }
+ftdi-mpsse = "0.1.2"
 strum = { workspace = true, features = ["derive"] }
+tracing.workspace = true

@@ -1,9 +1,12 @@
 mod backend;
 mod controller;
+pub mod ftdi;
 pub mod jtag;
 pub mod units;
+mod utils;
 
 pub use crate::{
     backend::{Backend, Buffer},
     controller::{Command, Controller},
+    utils::{Hex, ShortHex, SpaceHex},
 };
