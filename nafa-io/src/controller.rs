@@ -1,7 +1,9 @@
 use eyre::Result;
 
 use crate::{
-    Backend, Buffer, jtag,
+    Backend, Buffer,
+    backend::Data,
+    jtag::{self, PATHS, State},
     units::{Bits, Bytes},
 };
 
@@ -31,20 +33,20 @@ impl<B: Backend> Controller<B> {
 
         let buf: &mut dyn Buffer = buf;
 
-        // state must start in idle by contract
-        let mut state = jtag::State::RunTestIdle;
-        let mut it = commands.into_iter().peekable();
-        while let Some(command) = it.next() {
-            let last = it.peek().is_none_or(|c| matches!(c, Command::SetState(_)));
+        let ir0 = Some(PATHS[State::RunTestIdle][State::ShiftIR]);
+        let ir1 = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
+        let dr0 = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
+        let dr1 = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
+
+        for command in commands {
             match command {
-                Command::SetState(new_state) => {
-                    backend.tms(buf, jtag::PATHS[state][new_state])?;
-                    state = new_state;
+                Command::IrTxBits { tdi, len } => backend.bits(buf, ir0, tdi, len, ir1)?,
+                Command::DrTx { tdi } => backend.bytes(buf, dr0, Data::Tx(tdi), dr1)?,
+                Command::DrRx { len } => backend.bytes(buf, dr0, Data::Rx(len), dr1)?,
+                Command::DrTxRx { tdi } => backend.bytes(buf, dr0, Data::TxRx(tdi), dr1)?,
+                Command::Idle { len } => {
+                    backend.bytes(buf, None, Data::ConstantTx(false, len), None)?
                 }
-                Command::TxBytes { tdi } => backend.tdi_bytes(buf, tdi, last)?,
-                Command::TxBits { tdi, len } => backend.tdi_bits(buf, tdi, len, last)?,
-                Command::RxBytes { len } => backend.tdo_bytes(buf, len, last)?,
-                Command::TxRxBytes { tdi } => backend.tdi_tdo_bytes(buf, tdi, last)?,
             }
         }
 
@@ -54,74 +56,35 @@ impl<B: Backend> Controller<B> {
     }
 }
 
-// TODO: this is maybe the wrong API for when there's more than one device on
-// the JTAG chain.
-//
-// In that case, you need to start sending the data before you're even in the
-// correct state, to shift through the bypass/instruction registers of whatever
-// devices are before your target in the chain.
-//
-// The correct API maybe looks something like:
-// ```rust,ignore
-// enum Command {
-//     Ir { command: u8 },
-//     DrTx { data: &[u8] },
-//     DrRx { len: Bytes<usize> },
-//     DrTxRx { data: &[u8] },
-//     Idle { len: Bytes<usize> },
-// }
-// ```
-//
-// That is, _only_ support sending bits to the instruction register and bytes to
-// the data register. This covers all the current use cases. Given the JTAG
-// state machine, it's not even _possible_ to stay in most of the states. You're
-// only supposed to be transmitting data in the "0-stable" states --- ShiftIR,
-// ShiftDR, PauseIR, PauseDR, and Idle.
-//
-// For all current devices, the Data Register expects some sort of byte-bounded
-// communication. It doesn't really make sense to send, e.g., 5 bits to the
-// CFG_IN of an FPGA. Similarly, the Instruction Register never expects more
-// than 6 bits.
-//
-// Having the ability to send bytes while in idle is useful for cases like
-// waiting for the XADC write to finish.
-//
-// Currenly no need to send data to the other 0-stable states (PauseIR,
-// PauseDR).
-//
-// So, TLDR, options should be:
-// - idle -> shiftir, send bits, shiftir -> idle
-// - idle -> shiftdr, send bytes, shiftdr -> idle
-// - send bytes (resting in idle)
 #[derive(Clone, Copy, Debug)]
 pub enum Command<'d> {
-    SetState(jtag::State),
+    IrTxBits { tdi: u32, len: Bits<u8> },
 
-    TxBytes { tdi: &'d [u8] },
-    TxBits { tdi: u8, len: Bits<usize> },
+    DrTx { tdi: &'d [u8] },
+    DrRx { len: Bytes<usize> },
+    DrTxRx { tdi: &'d [u8] },
 
-    RxBytes { len: Bytes<usize> },
-
-    TxRxBytes { tdi: &'d [u8] },
+    Idle { len: Bytes<usize> },
 }
 
 impl<'d> Command<'d> {
-    pub fn set_state(state: jtag::State) -> Self {
-        Self::SetState(state)
+    pub fn ir(tdi: u32, len: Bits<u8>) -> Self {
+        Self::IrTxBits { tdi, len }
     }
 
-    pub fn tx_bytes(tdi: &'d [u8]) -> Self {
-        Self::TxBytes { tdi }
-    }
-    pub fn tx_bits(tdi: u8, len: Bits<usize>) -> Self {
-        Self::TxBits { tdi, len }
+    pub fn dr_tx(tdi: &'d [u8]) -> Self {
+        Self::DrTx { tdi }
     }
 
-    pub fn rx_bytes(len: Bytes<usize>) -> Self {
-        Self::RxBytes { len }
+    pub fn dr_rx(len: Bytes<usize>) -> Self {
+        Self::DrRx { len }
     }
 
-    pub fn tx_rx_bytes(tdi: &'d [u8]) -> Self {
-        Self::TxRxBytes { tdi }
+    pub fn dr_txrx(tdi: &'d [u8]) -> Self {
+        Self::DrTxRx { tdi }
+    }
+
+    pub fn idle(len: Bytes<usize>) -> Self {
+        Self::Idle { len }
     }
 }

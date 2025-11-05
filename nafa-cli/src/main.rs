@@ -11,7 +11,6 @@ use nafa_io::{
     units::{Bits, Bytes, Words32},
     xpc,
 };
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use crate::cli_helpers::UsbAddr;
 
@@ -143,8 +142,14 @@ fn get_device_ftdi(addr: UsbAddr) -> Result<ftdi::Device> {
     // TODO: this should be part of controller init
     let mut buf = Vec::new();
     dev.tms(&mut buf, jtag::Path::RESET)?;
-    dev.tms(&mut buf, jtag::PATHS[State::TestLogicReset][State::ShiftDR])?;
-    dev.tdo_bytes(&mut buf, Bytes(4), true)?;
+    let before = jtag::PATHS[State::TestLogicReset][State::ShiftDR];
+    let after = jtag::PATHS[State::ShiftDR][State::RunTestIdle];
+    dev.bytes(
+        &mut buf,
+        Some(before),
+        nafa_io::Data::Rx(Bytes(4)),
+        Some(after),
+    )?;
     dev.flush(&mut buf)?;
     let id = u32::from_le_bytes(buf[..4].try_into().unwrap());
     println!("id: {:08X?}", id);
@@ -154,7 +159,7 @@ fn get_device_ftdi(addr: UsbAddr) -> Result<ftdi::Device> {
 
 fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {
     let dev = rusb::open_device_with_vid_pid(addr.vid, addr.pid)
-        .ok_or_else(|| eyre!("failed to open device {:04X}:{:04X}", addr.vid, addr.pid))?;
+        .ok_or_else(|| eyre!("failed to open device {addr}"))?;
     let mut dev = xpc::Device::new(dev)?;
 
     let mut buf = Vec::new();
@@ -162,8 +167,12 @@ fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {
     dev.flush(&mut buf)?;
     dev.tms(&mut buf, jtag::PATHS[State::TestLogicReset][State::ShiftDR])?;
     dev.flush(&mut buf)?;
-    dev.tdo_bytes(&mut buf, Bytes(4), true)?;
-    dev.tms(&mut buf, jtag::Path::IDLE)?;
+    dev.bytes(
+        &mut buf,
+        None,
+        nafa_io::Data::Rx(Bytes(4)),
+        Some(jtag::Path::IDLE),
+    )?;
     dev.flush(&mut buf)?;
     let id = u32::from_le_bytes(buf[..4].try_into().unwrap());
     println!("id: {:08X?}", id);
@@ -178,12 +187,7 @@ fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
         ("fuse_key", nafa_xilinx::_32bit::commands::FUSE_KEY),
         ("fuse_dna", nafa_xilinx::_32bit::commands::FUSE_DNA),
     ] {
-        let data = cont.run([
-            Command::set_state(State::ShiftIR),
-            Command::tx_bits(cmd.val, Bits(6)),
-            Command::set_state(State::ShiftDR),
-            Command::rx_bytes(cmd.read_len),
-        ])?;
+        let data = cont.run([Command::ir(cmd.val as _, Bits(6)), Command::dr_rx(cmd.read_len)])?;
         println!("{:>12}: {}", name, ShortHex(data));
     }
     let x = |addr| Type1::new(OpCode::Read, addr, 1);
@@ -259,6 +263,7 @@ fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
 }
 
 fn init_logging() -> Result<()> {
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())

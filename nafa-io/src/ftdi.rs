@@ -3,7 +3,9 @@ pub use ftdi_mpsse::MpsseCmdExecutor;
 use tracing::{debug, instrument};
 
 use crate::{
-    Backend, Buffer, Hex, SpaceHex, jtag,
+    Backend, Buffer, SpaceHex,
+    backend::Data,
+    jtag,
     units::{Bits, Bytes},
 };
 
@@ -11,7 +13,6 @@ pub mod devices;
 
 pub struct Device {
     pub dev: ::ftdi::Device,
-    last: Option<bool>,
     pub cmd_buf: Vec<u8>,
     pub cmd_read_len: usize,
 }
@@ -41,7 +42,6 @@ impl Device {
 
         Ok(Self {
             dev,
-            last: None,
             cmd_buf: Vec::new(),
             cmd_read_len: 0,
         })
@@ -91,17 +91,8 @@ impl Device {
         }
         Ok(())
     }
-}
 
-// so, weirdness with sending bits when `last` ---
-//
-// The last bit of information on TDI corresponds with the state transition on
-// TMS. When sending a WRITE_TMS, the high bit corresponds to TDI. Therefore,
-// last bit 1 -> WRITE_TMS 0b1xxxxxxx, 0 -> WRITE_TMS 0b0xxxxxxx.
-impl Backend for Device {
-    #[instrument(skip_all)]
-    fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
-        let tdi = self.last.take().unwrap_or(false);
+    fn tms_internal(&mut self, buf: &mut dyn Buffer, path: jtag::Path, tdi: bool) -> Result<()> {
         debug!(%path, tdi);
 
         let tdi = if tdi { 0x80 } else { 0x00 };
@@ -113,126 +104,147 @@ impl Backend for Device {
 
         self.maybe_flush(buf)
     }
+}
 
+static ONES: &[u8; MAX_READ_WRITE_LEN] = &[0xff; MAX_READ_WRITE_LEN];
+static ZEROES: &[u8; MAX_READ_WRITE_LEN] = &[0x00; MAX_READ_WRITE_LEN];
+
+// so, weirdness with sending bits when `last` ---
+//
+// The last bit of information on TDI corresponds with the state transition on
+// TMS. When sending a WRITE_TMS, the high bit corresponds to TDI. Therefore,
+// last bit 1 -> WRITE_TMS 0b1xxxxxxx, 0 -> WRITE_TMS 0b0xxxxxxx.
+impl Backend for Device {
     #[instrument(skip_all)]
-    fn tdi_bytes(&mut self, buf: &mut dyn Buffer, tdi: &[u8], last: bool) -> Result<()> {
-        assert!(self.last.is_none());
-        debug!(len = ?Bytes(tdi.len()), last, data = %SpaceHex(tdi));
-
-        let bytes = DO_WRITE | LSB | WRITE_NEG;
-        let bits = bytes | BITMODE;
-
-        let (tdi, last) = if last {
-            match tdi.split_last() {
-                Some((l, data)) => (data, Some(*l)),
-                None => (tdi, None),
-            }
-        } else {
-            (tdi, None)
-        };
-
-        for chunk in tdi.chunks(MAX_READ_WRITE_LEN) {
-            let len = assert_data_len(chunk.len());
-            self.cmd_buf.push(bytes);
-            self.cmd_buf.push(len as u8);
-            self.cmd_buf.push((len >> 8) as u8);
-            self.cmd_buf.extend_from_slice(chunk);
-            self.maybe_flush(buf)?;
-        }
-
-        if let Some(last) = last {
-            self.cmd_buf.push(bits);
-            // 6 -> 7 bits, tx last bit separately when doing tms
-            self.cmd_buf.push(6);
-            self.cmd_buf.push(last);
-            self.last = Some((last & 0x80) != 0);
-        }
-
-        Ok(())
+    fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
+        self.tms_internal(buf, path, true)
     }
 
     #[instrument(skip_all)]
-    fn tdi_bits(
+    fn bytes(
         &mut self,
         buf: &mut dyn Buffer,
-        tdi: u8,
-        len: Bits<usize>,
-        last: bool,
+        before: Option<jtag::Path>,
+        data: Data<'_>,
+        after: Option<jtag::Path>,
     ) -> Result<()> {
-        assert!(self.last.is_none());
-        debug!(?len, last, data = %Hex(tdi));
-        let Bits(len) = len;
-
-        assert!(0 < len && len <= 8);
-        self.cmd_buf.push(DO_WRITE | LSB | BITMODE | WRITE_NEG);
-        self.cmd_buf.push(len as u8 - if last { 2 } else { 1 });
-        self.cmd_buf.push(tdi);
-
-        if last {
-            self.last = Some(tdi & 1 << (len - 1) != 0);
+        if let Some(path) = before {
+            self.tms_internal(buf, path, true)?;
         }
 
-        self.maybe_flush(buf)
-    }
+        let mut last_bit = true;
 
-    #[instrument(skip_all)]
-    fn tdo_bytes(&mut self, buf: &mut dyn Buffer, len: Bytes<usize>, last: bool) -> Result<()> {
-        assert!(self.last.is_none());
-        debug!(?len, last);
-        let Bytes(mut len) = len;
+        match data {
+            Data::Tx(tdi) | Data::TxRx(tdi) => {
+                let read = matches!(data, Data::TxRx(_));
+                let read_cmd = if read { DO_READ | READ_NEG } else { 0 };
+                let cmd = read_cmd | DO_WRITE | LSB | WRITE_NEG;
 
-        while len != 0 {
-            let to_add = len.min(MAX_READ_WRITE_LEN);
-            self.cmd_read_len += to_add;
-            let read_len = assert_data_len(to_add);
+                let (tdi, last) = match (after, tdi.split_last()) {
+                    (Some(_), Some((l, data))) => (data, Some(*l)),
+                    (None, _) | (Some(_), None) => (tdi, None),
+                };
 
-            self.cmd_buf.push(DO_READ | LSB | READ_NEG | WRITE_NEG);
-            self.cmd_buf.push(read_len as u8);
-            self.cmd_buf.push((read_len >> 8) as u8);
+                for chunk in tdi.chunks(MAX_READ_WRITE_LEN) {
+                    if read {
+                        self.cmd_read_len += chunk.len();
+                        debug!(add = chunk.len());
+                    }
+                    let len = assert_data_len(chunk.len());
+                    self.cmd_buf.push(cmd);
+                    self.cmd_buf.push(len as u8);
+                    self.cmd_buf.push((len >> 8) as u8);
+                    self.cmd_buf.extend_from_slice(chunk);
+                    self.maybe_flush(buf)?;
+                }
 
-            len = len.saturating_sub(MAX_READ_WRITE_LEN);
-            self.maybe_flush(buf)?;
+                if let Some(last) = last {
+                    self.cmd_buf.push(cmd | BITMODE);
+                    // 7 bits, tx last bit as part of tms
+                    self.cmd_buf.push(6);
+                    self.cmd_buf.push(last);
+                    if read {
+                        self.cmd_read_len += 1;
+                    }
+                    last_bit = last & 0x80 != 0;
+                }
+            }
+            Data::Rx(Bytes(mut len)) => {
+                while len != 0 {
+                    let to_add = len.min(MAX_READ_WRITE_LEN);
+                    self.cmd_read_len += to_add;
+                    let read_len = assert_data_len(to_add);
+
+                    self.cmd_buf.push(DO_READ | LSB | READ_NEG);
+                    self.cmd_buf.push(read_len as u8);
+                    self.cmd_buf.push((read_len >> 8) as u8);
+
+                    len = len.saturating_sub(MAX_READ_WRITE_LEN);
+                    self.maybe_flush(buf)?;
+                }
+            }
+            Data::ConstantTx(tdi, Bytes(mut len)) => {
+                while len != 0 {
+                    let to_add = len.min(MAX_READ_WRITE_LEN);
+                    let tdi = if tdi {
+                        &ONES[..to_add]
+                    } else {
+                        &ZEROES[..to_add]
+                    };
+                    let write_len = assert_data_len(to_add);
+
+                    self.cmd_buf.push(DO_WRITE | LSB | WRITE_NEG);
+                    self.cmd_buf.push(write_len as u8);
+                    self.cmd_buf.push((write_len >> 8) as u8);
+                    self.cmd_buf.extend_from_slice(tdi);
+
+                    len = len.saturating_sub(MAX_READ_WRITE_LEN);
+                    self.maybe_flush(buf)?;
+                }
+            }
+        };
+
+        if let Some(path) = after {
+            self.tms_internal(buf, path, last_bit)?;
         }
 
+        self.maybe_flush(buf)?;
         Ok(())
     }
 
     #[instrument(skip_all)]
-    fn tdi_tdo_bytes(&mut self, buf: &mut dyn Buffer, tdi: &[u8], last: bool) -> Result<()> {
-        assert!(self.last.is_none());
-        debug!(len = ?Bytes(tdi.len()), last, data = %SpaceHex(tdi));
+    fn bits(
+        &mut self,
+        buf: &mut dyn Buffer,
+        before: Option<jtag::Path>,
+        mut data: u32,
+        len: Bits<u8>,
+        after: Option<jtag::Path>,
+    ) -> Result<()> {
+        if let Some(path) = before {
+            self.tms_internal(buf, path, true)?;
+        }
 
-        let bytes = DO_READ | DO_WRITE | LSB | READ_NEG | WRITE_NEG;
-        let bits = bytes | BITMODE;
-
-        let (tdi, last) = if last {
-            match tdi.split_last() {
-                Some((l, data)) => (data, Some(*l)),
-                None => (tdi, None),
-            }
-        } else {
-            (tdi, None)
+        let mut len = match after {
+            Some(_) => len.0 - 1,
+            None => len.0,
         };
 
-        for chunk in tdi.chunks(MAX_READ_WRITE_LEN) {
-            self.cmd_read_len += chunk.len();
-            let len = assert_data_len(chunk.len());
-            self.cmd_buf.push(bytes);
-            self.cmd_buf.push(len as u8);
-            self.cmd_buf.push((len >> 8) as u8);
-            self.cmd_buf.extend_from_slice(chunk);
-            self.maybe_flush(buf)?;
+        let cmd = DO_WRITE | LSB | WRITE_NEG | BITMODE;
+        while len != 0 {
+            let added = if len > 8 { 8 } else { len };
+            self.cmd_buf.push(cmd);
+            self.cmd_buf.push(added - 1);
+            self.cmd_buf.push(data as u8);
+            data >>= added;
+            len -= added;
         }
 
-        if let Some(last) = last {
-            self.cmd_buf.push(bits);
-            // 6 -> 7 bits, tx last bit separately when doing tms
-            self.cmd_buf.push(6);
-            self.cmd_buf.push(last);
-            self.cmd_read_len += 1;
-            self.last = Some((last & 0x80) != 0);
+        if let Some(path) = after {
+            self.tms_internal(buf, path, data & 1 == 1)?;
         }
 
+        self.maybe_flush(buf)?;
         Ok(())
     }
 

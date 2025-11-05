@@ -7,10 +7,7 @@ use rusb::{
 };
 use tracing::{debug, info, instrument};
 
-use crate::{
-    Backend, Buffer, Hex, SpaceHex,
-    units::{Bits, Bytes},
-};
+use crate::{Backend, Buffer, Hex, SpaceHex, backend::Data, jtag, units::Bits};
 
 pub mod firmware;
 
@@ -46,8 +43,6 @@ pub struct Device {
     cmd_buf: Vec<u8>,
     cmd_read_len: usize,
     num_bits: u8,
-    last_tdi: Option<bool>,
-    last_tdo: Option<bool>,
 }
 
 const XPCU_CTRL_LOAD_FIRM: u8 = 0xA0;
@@ -111,8 +106,6 @@ impl Device {
             cmd_buf: Vec::new(),
             cmd_read_len: 0,
             num_bits: 0,
-            last_tdi: None,
-            last_tdo: None,
         })
     }
 
@@ -204,127 +197,135 @@ fn shift(
 #[allow(unused)]
 impl Backend for Device {
     #[instrument(skip_all)]
-    fn tms(&mut self, buf: &mut dyn Buffer, path: crate::jtag::Path) -> Result<()> {
-        let last_tdi = self.last_tdi.take().unwrap_or(false);
-        let last_tdo = self.last_tdo.take().unwrap_or(false);
+    fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
+        for tms in path {
+            self.add_bit(tms, true, false);
+        }
 
-        for (idx, tms) in path.into_iter().enumerate() {
-            if idx == 0 {
-                self.add_bit(tms, last_tdi, last_tdo);
-            } else {
+        self.maybe_flush(buf)?;
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    fn bytes(
+        &mut self,
+        buf: &mut dyn Buffer,
+        before: Option<jtag::Path>,
+        data: Data<'_>,
+        after: Option<jtag::Path>,
+    ) -> Result<()> {
+        if let Some(path) = before {
+            for tms in path {
                 self.add_bit(tms, true, false);
             }
         }
 
-        self.maybe_flush(buf);
-        Ok(())
-    }
-
-    #[instrument(skip_all)]
-    fn tdi_bytes(&mut self, buf: &mut dyn Buffer, tdi: &[u8], last: bool) -> Result<()> {
-        assert!(self.last_tdi.is_none());
-        assert!(self.last_tdo.is_none());
-
         let tms = false;
-        let tdo = false;
-        for (idx, byte) in tdi.iter().copied().enumerate() {
-            self.add_bit(tms, byte & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 1 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 2 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 3 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 4 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 5 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 6 & 1 != 0, tdo);
-            if last && idx == tdi.len() - 1 {
-                self.last_tdi = Some(byte >> 7 & 1 != 0);
-            } else {
-                self.add_bit(tms, byte >> 7 & 1 != 0, tdo);
-            }
+        let mut last_tdi = true;
+        let mut last_tdo = false;
+        match data {
+            Data::Tx(tdi) | Data::TxRx(tdi) => {
+                let tdo = matches!(data, Data::TxRx(_));
+                for (idx, byte) in tdi.iter().copied().enumerate() {
+                    self.add_bit(tms, byte & 1 != 0, tdo);
+                    self.add_bit(tms, byte >> 1 & 1 != 0, tdo);
+                    self.add_bit(tms, byte >> 2 & 1 != 0, tdo);
+                    self.add_bit(tms, byte >> 3 & 1 != 0, tdo);
+                    self.add_bit(tms, byte >> 4 & 1 != 0, tdo);
+                    self.add_bit(tms, byte >> 5 & 1 != 0, tdo);
+                    self.add_bit(tms, byte >> 6 & 1 != 0, tdo);
+                    if after.is_some() && idx == tdi.len() - 1 {
+                        last_tdi = byte >> 7 & 1 != 0;
+                        last_tdo = tdo;
+                    } else {
+                        self.add_bit(tms, byte >> 7 & 1 != 0, tdo);
+                    }
 
-            self.maybe_flush(buf)?;
+                    if tdo {
+                        self.cmd_read_len += 1;
+                    }
+                    self.maybe_flush(buf)?;
+                }
+            }
+            Data::Rx(len) | Data::ConstantTx(_, len) => {
+                let tdi = match data {
+                    Data::ConstantTx(tdi, _) => tdi,
+                    _ => true,
+                };
+                let tdo = matches!(data, Data::Rx(_));
+                for idx in 0..len.0 {
+                    self.add_bit(tms, tdi, tdo);
+                    self.add_bit(tms, tdi, tdo);
+                    self.add_bit(tms, tdi, tdo);
+                    self.add_bit(tms, tdi, tdo);
+                    self.add_bit(tms, tdi, tdo);
+                    self.add_bit(tms, tdi, tdo);
+                    self.add_bit(tms, tdi, tdo);
+                    if after.is_some() && idx == len.0 - 1 {
+                        last_tdo = tdo;
+                    } else {
+                        self.add_bit(tms, tdi, tdo);
+                    }
+
+                    if tdo {
+                        self.cmd_read_len += 1;
+                    }
+                    self.maybe_flush(buf)?;
+                }
+            }
         }
+
+        if let Some(path) = after {
+            let mut it = path.into_iter();
+            if let Some(tms) = it.next() {
+                self.add_bit(tms, last_tdi, last_tdo);
+            }
+            for tms in it {
+                self.add_bit(tms, true, false);
+            }
+        }
+
+        self.maybe_flush(buf)?;
         Ok(())
     }
 
     #[instrument(skip_all)]
-    fn tdi_bits(
+    fn bits(
         &mut self,
         buf: &mut dyn Buffer,
-        tdi: u8,
-        len: Bits<usize>,
-        last: bool,
+        before: Option<jtag::Path>,
+        mut data: u32,
+        len: Bits<u8>,
+        after: Option<jtag::Path>,
     ) -> Result<()> {
-        assert!(self.last_tdi.is_none());
-        assert!(self.last_tdo.is_none());
+        if let Some(path) = before {
+            for tms in path {
+                self.add_bit(tms, true, false);
+            }
+        }
 
-        let (len, last) = if last {
-            (len.0 - 1, Some(tdi >> (len.0 - 1) & 1 != 0))
-        } else {
-            (len.0, None)
+        let len = match after {
+            Some(_) => len.0 - 1,
+            None => len.0,
         };
 
         let tms = false;
-        let tdo = false;
-        for idx in 0..len {
-            self.add_bit(tms, tdi >> idx & 1 != 0, tdo);
+        for _ in 0..len {
+            self.add_bit(tms, data & 1 == 1, false);
+            data >>= 1;
         }
 
-        self.last_tdi = last;
-
-        self.maybe_flush(buf)
-    }
-
-    #[instrument(skip_all)]
-    fn tdo_bytes(&mut self, buf: &mut dyn Buffer, len: Bytes<usize>, last: bool) -> Result<()> {
-        assert!(self.last_tdi.is_none());
-        assert!(self.last_tdo.is_none());
-        let tms = false;
-        let tdi = false;
-        let tdo = true;
-        for idx in 0..len.0 {
-            self.add_bit(tms, tdi, tdo);
-            self.add_bit(tms, tdi, tdo);
-            self.add_bit(tms, tdi, tdo);
-            self.add_bit(tms, tdi, tdo);
-            self.add_bit(tms, tdi, tdo);
-            self.add_bit(tms, tdi, tdo);
-            self.add_bit(tms, tdi, tdo);
-            if last && idx == len.0 - 1 {
-                self.last_tdo = Some(tdo);
-            } else {
-                self.add_bit(tms, tdi, tdo);
+        if let Some(path) = after {
+            let mut it = path.into_iter();
+            if let Some(tms) = it.next() {
+                self.add_bit(tms, data & 1 == 1, false);
             }
-
-            self.cmd_read_len += 1;
-            self.maybe_flush(buf)?;
-        }
-        Ok(())
-    }
-
-    #[instrument(skip_all)]
-    fn tdi_tdo_bytes(&mut self, buf: &mut dyn Buffer, tdi: &[u8], last: bool) -> Result<()> {
-        assert!(self.last_tdi.is_none());
-        assert!(self.last_tdo.is_none());
-        let tms = false;
-        let tdo = true;
-        for (idx, byte) in tdi.iter().copied().enumerate() {
-            self.add_bit(tms, byte & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 1 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 2 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 3 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 4 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 5 & 1 != 0, tdo);
-            self.add_bit(tms, byte >> 6 & 1 != 0, tdo);
-            if idx == tdi.len() - 1 && last {
-                self.last_tdi = Some(byte >> 7 & 1 != 0);
-                self.last_tdo = Some(true);
-            } else {
-                self.add_bit(tms, byte >> 7 & 1 != 0, tdo);
+            for tms in it {
+                self.add_bit(tms, true, false);
             }
-
-            self.cmd_read_len += 1;
-            self.maybe_flush(buf)?;
         }
+
+        self.maybe_flush(buf)?;
         Ok(())
     }
 
@@ -348,6 +349,7 @@ impl Backend for Device {
         debug!(
             in_bits,
             in_len = self.cmd_buf.len(),
+            expect_read = self.cmd_read_len,
             data = %SpaceHex(&self.cmd_buf),
         );
         shift(&self.handle, 0xa6, in_bits, &self.cmd_buf, buf)?;
@@ -355,8 +357,6 @@ impl Backend for Device {
         self.cmd_buf.clear();
         self.cmd_read_len = 0;
         self.num_bits = 0;
-        self.last_tdi = None;
-        self.last_tdo = None;
 
         Ok(())
     }

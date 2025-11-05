@@ -1,7 +1,6 @@
 use eyre::Result;
 use nafa_io::{
     Backend, Command, Controller,
-    jtag::State,
     units::{Bits, Bytes, Words32},
 };
 
@@ -16,14 +15,10 @@ pub fn read_register<B: Backend>(cont: &mut Controller<B>, reg: Type1) -> Result
     let tiny_bitstream = tiny_bitstream.as_flattened();
 
     cont.run([
-        Command::set_state(State::ShiftIR),
-        Command::tx_bits(commands::CFG_IN, Bits(6)),
-        Command::set_state(State::ShiftDR),
-        Command::tx_bytes(tiny_bitstream),
-        Command::set_state(State::ShiftIR),
-        Command::tx_bits(commands::CFG_OUT, Bits(6)),
-        Command::set_state(State::ShiftDR),
-        Command::rx_bytes(Bytes(4)),
+        Command::ir(commands::CFG_IN as _, Bits(6)),
+        Command::dr_tx(tiny_bitstream),
+        Command::ir(commands::CFG_OUT as _, Bits(6)),
+        Command::dr_rx(Bytes(4)),
     ])
 }
 
@@ -36,34 +31,19 @@ pub fn read_xadc<B: Backend>(
         .map(|c| c.to_bits().to_le_bytes())
         .collect();
 
-    let start = [
-        Command::set_state(State::ShiftIR),
-        Command::tx_bits(commands::XADC_DRP, Bits(6)),
-        Command::set_state(State::ShiftDR),
-    ];
-    let between = [
-        Command::set_state(State::RunTestIdle),
-        Command::tx_bytes(&[0; 10]),
-        Command::set_state(State::ShiftDR),
-    ];
-    let after = [Command::rx_bytes(Bytes(4))];
+    let start = [Command::ir(commands::XADC_DRP as _, Bits(6))];
+    let between = [Command::idle(Bytes(10))];
+    let after = [Command::dr_rx(Bytes(4))];
 
     let drp_commands = drp_commands
         .iter()
-        .flat_map(|c| std::iter::once(Command::tx_rx_bytes(c)).chain(between));
+        .flat_map(|c| std::iter::once(Command::dr_txrx(c)).chain(between));
 
     cont.run(start.into_iter().chain(drp_commands).chain(after))
 }
 
 pub fn program<B: Backend + Send>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
-    let commands = [
-        Command::set_state(State::ShiftIR),
-        Command::tx_bits(commands::CFG_IN, Bits(6)),
-        Command::set_state(State::ShiftDR),
-        Command::tx_bytes(data),
-    ];
-
-    cont.run(commands)?;
+    cont.run([Command::ir(commands::CFG_IN as _, Bits(6)), Command::dr_tx(data)])?;
     Ok(())
 }
 
@@ -99,14 +79,10 @@ pub fn readback<B: Backend + Send>(cont: &mut Controller<B>, len: Words32<usize>
     // going out of the `DR` side of JTAG makes the fpga just drop all further data.
 
     let commands = [
-        Command::set_state(State::ShiftIR),
-        Command::tx_bits(commands::CFG_IN, Bits(6)),
-        Command::set_state(State::ShiftDR),
-        Command::tx_bytes(readback),
-        Command::set_state(State::ShiftIR),
-        Command::tx_bits(commands::CFG_OUT, Bits(6)),
-        Command::set_state(State::ShiftDR),
-        Command::rx_bytes(len.into()),
+        Command::ir(commands::CFG_IN as _, Bits(6)),
+        Command::dr_tx(readback),
+        Command::ir(commands::CFG_OUT as _, Bits(6)),
+        Command::dr_rx(len.into()),
     ];
 
     cont.run(commands)

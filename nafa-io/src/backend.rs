@@ -5,28 +5,36 @@ use crate::{
     units::{Bits, Bytes},
 };
 
+pub enum Data<'d> {
+    Tx(&'d [u8]),
+    Rx(Bytes<usize>),
+    TxRx(&'d [u8]),
+    ConstantTx(bool, Bytes<usize>),
+}
+
 /// A device that is able to talk over JTAG.
 ///
 /// The implementation is allowed to flush at any time, though only required to
 /// flush on [`Backend::flush`].
-///
-/// `last` refers to whether the given packet is the last packet before
-/// transitioning states.
 pub trait Backend {
     fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()>;
 
-    fn tdi_bytes(&mut self, buf: &mut dyn Buffer, tdi: &[u8], last: bool) -> Result<()>;
-    fn tdi_bits(
+    fn bytes(
         &mut self,
         buf: &mut dyn Buffer,
-        tdi: u8,
-        len: Bits<usize>,
-        last: bool,
+        before: Option<jtag::Path>,
+        data: Data<'_>,
+        after: Option<jtag::Path>,
     ) -> Result<()>;
 
-    fn tdo_bytes(&mut self, buf: &mut dyn Buffer, len: Bytes<usize>, last: bool) -> Result<()>;
-
-    fn tdi_tdo_bytes(&mut self, buf: &mut dyn Buffer, tdi: &[u8], last: bool) -> Result<()>;
+    fn bits(
+        &mut self,
+        buf: &mut dyn Buffer,
+        before: Option<jtag::Path>,
+        data: u32,
+        len: Bits<u8>,
+        after: Option<jtag::Path>,
+    ) -> Result<()>;
 
     /// Run any queud IO commands
     fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()>;
@@ -40,29 +48,28 @@ pub trait Buffer {
 
 impl<B: Backend + ?Sized> Backend for Box<B> {
     fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
-        B::tms(&mut *self, buf, path)
+        B::tms(self, buf, path)
     }
 
-    fn tdi_bytes(&mut self, buf: &mut dyn Buffer, tdi: &[u8], last: bool) -> Result<()> {
-        B::tdi_bytes(&mut *self, buf, tdi, last)
-    }
-
-    fn tdi_bits(
+    fn bytes(
         &mut self,
         buf: &mut dyn Buffer,
-        tdi: u8,
-        len: Bits<usize>,
-        last: bool,
+        before: Option<jtag::Path>,
+        data: Data<'_>,
+        after: Option<jtag::Path>,
     ) -> Result<()> {
-        B::tdi_bits(&mut *self, buf, tdi, len, last)
+        B::bytes(self, buf, before, data, after)
     }
 
-    fn tdo_bytes(&mut self, buf: &mut dyn Buffer, len: Bytes<usize>, last: bool) -> Result<()> {
-        B::tdo_bytes(&mut *self, buf, len, last)
-    }
-
-    fn tdi_tdo_bytes(&mut self, buf: &mut dyn Buffer, tdi: &[u8], last: bool) -> Result<()> {
-        B::tdi_tdo_bytes(&mut *self, buf, tdi, last)
+    fn bits(
+        &mut self,
+        buf: &mut dyn Buffer,
+        before: Option<jtag::Path>,
+        data: u32,
+        len: Bits<u8>,
+        after: Option<jtag::Path>,
+    ) -> Result<()> {
+        B::bits(self, buf, before, data, len, after)
     }
 
     fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {

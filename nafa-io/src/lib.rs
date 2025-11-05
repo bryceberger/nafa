@@ -7,7 +7,7 @@ mod utils;
 pub mod xpc;
 
 pub use crate::{
-    backend::{Backend, Buffer},
+    backend::{Backend, Buffer, Data},
     controller::{Command, Controller},
     utils::{Hex, ShortHex, SpaceHex},
 };
