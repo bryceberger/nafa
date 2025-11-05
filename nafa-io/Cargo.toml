@@ -8,5 +8,6 @@ authors.workspace = true
 eyre.workspace = true
 ftdi = { version = "0.1.3", features = ["vendored"] }
 ftdi-mpsse = "0.1.2"
+rusb = { version = "0.9.4", features = ["vendored"] }
 strum = { workspace = true, features = ["derive"] }
 tracing.workspace = true
