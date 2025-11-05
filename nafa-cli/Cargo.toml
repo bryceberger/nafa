@@ -1,0 +1,18 @@
+[package]
+name = "nafa-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+clap = { version = "4.5.50", features = ["derive"] }
+color-eyre.workspace = true
+eyre.workspace = true
+ftdi.workspace = true
+indicatif = "0.18.2"
+nafa-io.path = "../nafa-io"
+nafa-xilinx.path = "../nafa-xilinx"
+rusb.workspace = true
+tracing-error = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing.workspace = true

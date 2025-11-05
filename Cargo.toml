@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["nafa-io", "nafa-xilinx"]
+members = ["nafa-cli","nafa-io", "nafa-xilinx"]
 
 [workspace.package]
 version = "0.0.1"
@@ -8,6 +8,9 @@ edition = "2024"
 authors = ["Bryce Berger"]
 
 [workspace.dependencies]
-eyre = "0.6.12"
+color-eyre = "0.6"
+eyre = "0.6"
+ftdi = { version = "0.1.3", features = ["vendored"] }
+rusb = { version = "0.9.4", features = ["vendored"] }
 strum = "0.27.2"
 tracing = "0.1"
