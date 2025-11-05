@@ -1,0 +1,8 @@
+style_edition = "2024"
+
+array_width = 80
+wrap_comments = true
+format_strings = true
+
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
