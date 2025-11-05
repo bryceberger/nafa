@@ -117,6 +117,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nafa-xilinx"
+version = "0.0.1"
+dependencies = [
+ "eyre",
+ "nafa-io",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

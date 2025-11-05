@@ -1,0 +1,9 @@
+[package]
+name = "nafa-xilinx"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+eyre.workspace = true
+nafa-io.path = "../nafa-io"
