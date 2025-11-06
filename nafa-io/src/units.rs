@@ -9,6 +9,7 @@ pub struct Bits<T>(pub T);
 pub struct Bytes<T>(pub T);
 
 #[repr(transparent)]
+#[derive(Clone, Copy, Debug)]
 pub struct Words32<T>(pub T);
 
 impl<T> From<Bytes<T>> for Bits<T>

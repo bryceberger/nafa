@@ -1,7 +1,7 @@
 use eyre::Result;
 use nafa_io::{
     Backend, Command, Controller,
-    units::{Bits, Bytes, Words32},
+    units::{Bytes, Words32},
 };
 
 pub mod commands;
@@ -15,9 +15,9 @@ pub fn read_register<B: Backend>(cont: &mut Controller<B>, reg: Type1) -> Result
     let tiny_bitstream = tiny_bitstream.as_flattened();
 
     cont.run([
-        Command::ir(commands::CFG_IN as _, Bits(6)),
+        Command::ir(commands::CFG_IN as _),
         Command::dr_tx(tiny_bitstream),
-        Command::ir(commands::CFG_OUT as _, Bits(6)),
+        Command::ir(commands::CFG_OUT as _),
         Command::dr_rx(Bytes(4)),
     ])
 }
@@ -31,7 +31,7 @@ pub fn read_xadc<B: Backend>(
         .map(|c| c.to_bits().to_le_bytes())
         .collect();
 
-    let start = [Command::ir(commands::XADC_DRP as _, Bits(6))];
+    let start = [Command::ir(commands::XADC_DRP as _)];
     let between = [Command::idle(Bytes(10))];
     let after = [Command::dr_rx(Bytes(4))];
 
@@ -43,11 +43,11 @@ pub fn read_xadc<B: Backend>(
 }
 
 pub fn program<B: Backend + Send>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
-    cont.run([Command::ir(commands::CFG_IN as _, Bits(6)), Command::dr_tx(data)])?;
+    cont.run([Command::ir(commands::CFG_IN as _), Command::dr_tx(data)])?;
     Ok(())
 }
 
-pub fn readback<B: Backend + Send>(cont: &mut Controller<B>, len: Words32<usize>) -> Result<&[u8]> {
+pub fn readback<B: Backend + Send>(cont: &mut Controller<B>, len: Bytes<usize>) -> Result<&[u8]> {
     use self::registers::{Addr, OpCode, type2};
     let readback = [
         Type1::SYNC,
@@ -79,10 +79,10 @@ pub fn readback<B: Backend + Send>(cont: &mut Controller<B>, len: Words32<usize>
     // going out of the `DR` side of JTAG makes the fpga just drop all further data.
 
     let commands = [
-        Command::ir(commands::CFG_IN as _, Bits(6)),
+        Command::ir(commands::CFG_IN as _),
         Command::dr_tx(readback),
-        Command::ir(commands::CFG_OUT as _, Bits(6)),
-        Command::dr_rx(len.into()),
+        Command::ir(commands::CFG_OUT as _),
+        Command::dr_rx(len),
     ];
 
     cont.run(commands)

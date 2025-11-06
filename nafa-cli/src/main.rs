@@ -1,13 +1,13 @@
 #![feature(iter_intersperse)]
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use clap::Parser;
 use color_eyre::{Result, eyre::eyre};
 use nafa_io::{
-    Backend as BackendTrait, Command, Controller, ShortHex, ftdi,
-    ftdi::devices,
-    units::{Bits, Words32},
+    Backend as BackendTrait, Command, Controller, ShortHex,
+    devices::DeviceInfo,
+    ftdi::{self, devices},
     xpc,
 };
 
@@ -67,9 +67,6 @@ enum Firmware {
 
 #[derive(clap::Args)]
 struct Readback {
-    /// Number of *words* to read back.
-    #[arg(short, long)]
-    len: usize,
     output_file: PathBuf,
 }
 
@@ -89,20 +86,26 @@ fn main() -> Result<()> {
 
         // controller
         CliCommand::Info => {
-            let mut cont = get_controller(global.backend, global.usb)?;
+            let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
             info(&mut cont)?;
         }
         CliCommand::InfoXadc => {
-            let mut cont = get_controller(global.backend, global.usb)?;
+            let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
             info_xadc(&mut cont)?;
         }
         CliCommand::Readback(args) => {
-            let mut cont = get_controller(global.backend, global.usb)?;
-            let data = nafa_xilinx::_32bit::readback(&mut cont, Words32(args.len))?;
+            let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
+            let data = match &cont.info().specific {
+                nafa_io::devices::Specific::Unknown => todo!(),
+                nafa_io::devices::Specific::Xilinx32(info) => {
+                    let len = info.readback.into();
+                    nafa_xilinx::_32bit::readback(&mut cont, len)?
+                }
+            };
             std::fs::write(args.output_file, data)?;
         }
         CliCommand::Program(args) => {
-            let mut cont = get_controller(global.backend, global.usb)?;
+            let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
             let mut data = std::fs::read(args.input_file)?;
             for d in &mut data {
                 *d = d.reverse_bits();
@@ -113,15 +116,20 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn get_devices() -> HashMap<u32, DeviceInfo> {
+    nafa_io::devices::builtin().collect()
+}
+
 fn get_controller(
     backend: Backend,
+    devices: &HashMap<u32, DeviceInfo>,
     addr: UsbAddr,
 ) -> Result<Controller<Box<dyn BackendTrait + Send>>> {
     let backend: Box<dyn BackendTrait + Send> = match backend {
         Backend::Ftdi => Box::new(get_device_ftdi(addr)?),
         Backend::Xpc => Box::new(get_device_xpc(addr)?),
     };
-    Controller::new(backend)
+    Controller::new(backend, devices)
 }
 
 fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
@@ -152,7 +160,7 @@ fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
         ("fuse_key", nafa_xilinx::_32bit::commands::FUSE_KEY),
         ("fuse_dna", nafa_xilinx::_32bit::commands::FUSE_DNA),
     ] {
-        let data = cont.run([Command::ir(cmd.val as _, Bits(6)), Command::dr_rx(cmd.read_len)])?;
+        let data = cont.run([Command::ir(cmd.val as _), Command::dr_rx(cmd.read_len)])?;
         println!("{:>12}: {}", name, ShortHex(data));
     }
     let x = |addr| Type1::new(OpCode::Read, addr, 1);

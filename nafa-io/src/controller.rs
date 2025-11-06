@@ -1,19 +1,23 @@
+use std::collections::HashMap;
+
 use eyre::{Result, eyre};
 
 use crate::{
     Backend, Buffer,
     backend::Data,
+    devices::DeviceInfo,
     jtag::{self, PATHS, State},
-    units::{Bits, Bytes},
+    units::Bytes,
 };
 
 pub struct Controller<B> {
     backend: B,
+    pub info: DeviceInfo,
     buf: Vec<u8>,
 }
 
 impl<B: Backend> Controller<B> {
-    pub fn new(mut backend: B) -> Result<Self> {
+    pub fn new(mut backend: B, devices: &HashMap<u32, DeviceInfo>) -> Result<Self> {
         let mut buf = Vec::new();
         backend.tms(&mut buf, jtag::Path::RESET)?;
         backend.tms(&mut buf, jtag::Path::RESET)?;
@@ -28,10 +32,19 @@ impl<B: Backend> Controller<B> {
         if u32::from_le_bytes(*extra) & 0xffff_ff00 != 0xffff_ff00 {
             return Err(eyre!("multiple devices detected on jtag chain"));
         }
-        let _id = u32::from_le_bytes(*id);
+        let id = u32::from_le_bytes(*id);
+        let info = devices
+            .get(&id)
+            .ok_or_else(|| eyre!("idcode {id:08X} not found in device list"))?
+            .clone();
+        assert!(info.irlen.0 <= 32);
 
         buf.clear();
-        Ok(Self { backend, buf })
+        Ok(Self { backend, buf, info })
+    }
+
+    pub fn info(&self) -> &DeviceInfo {
+        &self.info
     }
 
     /// Run a set of commands, returning the data read out of TDO.
@@ -41,7 +54,7 @@ impl<B: Backend> Controller<B> {
     ///
     /// When IO occurs, the number of bytes read is sent over `sender`.
     pub fn run<'d>(&mut self, commands: impl IntoIterator<Item = Command<'d>>) -> Result<&[u8]> {
-        let Self { backend, buf } = self;
+        let Self { backend, buf, info } = self;
         buf.clear();
 
         let buf: &mut dyn Buffer = buf;
@@ -53,7 +66,7 @@ impl<B: Backend> Controller<B> {
 
         for command in commands {
             match command {
-                Command::IrTxBits { tdi, len } => backend.bits(buf, ir0, tdi, len, ir1)?,
+                Command::IrTxBits { tdi } => backend.bits(buf, ir0, tdi, info.irlen, ir1)?,
                 Command::DrTx { tdi } => backend.bytes(buf, dr0, Data::Tx(tdi), dr1)?,
                 Command::DrRx { len } => backend.bytes(buf, dr0, Data::Rx(len), dr1)?,
                 Command::DrTxRx { tdi } => backend.bytes(buf, dr0, Data::TxRx(tdi), dr1)?,
@@ -71,7 +84,7 @@ impl<B: Backend> Controller<B> {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Command<'d> {
-    IrTxBits { tdi: u32, len: Bits<u8> },
+    IrTxBits { tdi: u32 },
 
     DrTx { tdi: &'d [u8] },
     DrRx { len: Bytes<usize> },
@@ -81,8 +94,8 @@ pub enum Command<'d> {
 }
 
 impl<'d> Command<'d> {
-    pub fn ir(tdi: u32, len: Bits<u8>) -> Self {
-        Self::IrTxBits { tdi, len }
+    pub fn ir(tdi: u32) -> Self {
+        Self::IrTxBits { tdi }
     }
 
     pub fn dr_tx(tdi: &'d [u8]) -> Self {
