@@ -7,8 +7,7 @@ use color_eyre::{Result, eyre::eyre};
 use nafa_io::{
     Backend as BackendTrait, Command, Controller, ShortHex, ftdi,
     ftdi::devices,
-    jtag::{self, State},
-    units::{Bits, Bytes, Words32},
+    units::{Bits, Words32},
     xpc,
 };
 
@@ -137,47 +136,13 @@ fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
 
 fn get_device_ftdi(addr: UsbAddr) -> Result<ftdi::Device> {
     let dev = ::ftdi::find_by_vid_pid(addr.vid, addr.pid).open()?;
-    let mut dev = ftdi::Device::new(dev, &devices::NEXSYS4)?;
-
-    // TODO: this should be part of controller init
-    let mut buf = Vec::new();
-    dev.tms(&mut buf, jtag::Path::RESET)?;
-    let before = jtag::PATHS[State::TestLogicReset][State::ShiftDR];
-    let after = jtag::PATHS[State::ShiftDR][State::RunTestIdle];
-    dev.bytes(
-        &mut buf,
-        Some(before),
-        nafa_io::Data::Rx(Bytes(4)),
-        Some(after),
-    )?;
-    dev.flush(&mut buf)?;
-    let id = u32::from_le_bytes(buf[..4].try_into().unwrap());
-    println!("id: {:08X?}", id);
-
-    Ok(dev)
+    ftdi::Device::new(dev, &devices::NEXSYS4)
 }
 
 fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {
     let dev = rusb::open_device_with_vid_pid(addr.vid, addr.pid)
         .ok_or_else(|| eyre!("failed to open device {addr}"))?;
-    let mut dev = xpc::Device::new(dev)?;
-
-    let mut buf = Vec::new();
-    dev.tms(&mut buf, jtag::Path::RESET)?;
-    dev.flush(&mut buf)?;
-    dev.tms(&mut buf, jtag::PATHS[State::TestLogicReset][State::ShiftDR])?;
-    dev.flush(&mut buf)?;
-    dev.bytes(
-        &mut buf,
-        None,
-        nafa_io::Data::Rx(Bytes(4)),
-        Some(jtag::Path::IDLE),
-    )?;
-    dev.flush(&mut buf)?;
-    let id = u32::from_le_bytes(buf[..4].try_into().unwrap());
-    println!("id: {:08X?}", id);
-
-    Ok(dev)
+    xpc::Device::new(dev)
 }
 
 fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {

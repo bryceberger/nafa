@@ -1,4 +1,4 @@
-use eyre::Result;
+use eyre::{Result, eyre};
 
 use crate::{
     Backend, Buffer,
@@ -15,8 +15,21 @@ pub struct Controller<B> {
 impl<B: Backend> Controller<B> {
     pub fn new(mut backend: B) -> Result<Self> {
         let mut buf = Vec::new();
-        backend.tms(&mut buf, jtag::Path::IDLE)?;
+        backend.tms(&mut buf, jtag::Path::RESET)?;
+        backend.tms(&mut buf, jtag::Path::RESET)?;
+        let before = Some(jtag::PATHS[State::TestLogicReset][State::ShiftDR]);
+        let after = Some(jtag::PATHS[State::ShiftDR][State::RunTestIdle]);
+        backend.bytes(&mut buf, before, Data::Rx(Bytes(8)), after)?;
         backend.flush(&mut buf)?;
+
+        let [id, extra] = buf.as_chunks().0 else {
+            return Err(eyre!("backend failed to fill buffer"));
+        };
+        if u32::from_le_bytes(*extra) & 0xffff_ff00 != 0xffff_ff00 {
+            return Err(eyre!("multiple devices detected on jtag chain"));
+        }
+        let _id = u32::from_le_bytes(*id);
+
         buf.clear();
         Ok(Self { backend, buf })
     }
