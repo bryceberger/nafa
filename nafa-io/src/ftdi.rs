@@ -24,7 +24,11 @@ unsafe impl Send for Device {}
 
 impl Device {
     pub fn new(mut dev: ftdi::Device, info: &devices::Info) -> Result<Self> {
-        dev.init(&Default::default())?;
+        dev.init(&ftdi_mpsse::MpsseSettings {
+            // max frequency
+            clock_frequency: Some(30_000_000),
+            ..Default::default()
+        })?;
         let init_cmd = [
             MpsseCommand::SetDataBitsLowbyte as u8,
             info.dbus_data,
@@ -37,8 +41,6 @@ impl Device {
             info.cbus_en,
         ];
         dev.send(&init_cmd)?;
-
-        // TODO: could set the clock to be fast here
 
         Ok(Self {
             dev,
