@@ -1,8 +1,5 @@
 use eyre::Result;
-use nafa_io::{
-    Backend, Command, Controller,
-    units::{Bytes, Words32},
-};
+use nafa_io::{Backend, Command, Controller, units::Bytes};
 
 pub mod commands;
 pub mod drp;
@@ -43,7 +40,7 @@ pub fn read_xadc<B: Backend>(
 }
 
 pub fn program<B: Backend + Send>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
-    cont.run([Command::ir(commands::CFG_IN as _), Command::dr_tx(data)])?;
+    cont.run([Command::ir(commands::CFG_IN as _), Command::dr_tx_with_notification(data)])?;
     Ok(())
 }
 
@@ -82,7 +79,7 @@ pub fn readback<B: Backend + Send>(cont: &mut Controller<B>, len: Bytes<usize>) 
         Command::ir(commands::CFG_IN as _),
         Command::dr_tx(readback),
         Command::ir(commands::CFG_OUT as _),
-        Command::dr_rx(len),
+        Command::dr_rx_with_notification(len),
     ];
 
     cont.run(commands)

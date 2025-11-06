@@ -244,6 +244,7 @@ impl Backend for Device {
                     if tdo {
                         self.cmd_read_len += 1;
                     }
+                    buf.notify_write(1);
                     self.maybe_flush(buf)?;
                 }
             }

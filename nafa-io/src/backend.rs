@@ -44,6 +44,10 @@ pub trait Buffer {
     /// Extend the buffer, returning a mutable slice to the newly-allocated
     /// memory
     fn extend(&mut self, size: usize) -> &mut [u8];
+
+    /// Notify that `size` bytes were written. Used for progress bars.
+    #[expect(unused)]
+    fn notify_write(&mut self, size: usize) {}
 }
 
 impl<B: Backend + ?Sized> Backend for Box<B> {

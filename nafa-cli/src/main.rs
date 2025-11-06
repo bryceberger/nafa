@@ -1,6 +1,10 @@
 #![feature(iter_intersperse)]
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 use clap::Parser;
 use color_eyre::{Result, eyre::eyre};
@@ -8,6 +12,7 @@ use nafa_io::{
     Backend as BackendTrait, Command, Controller, ShortHex,
     devices::DeviceInfo,
     ftdi::{self, devices},
+    units::Bytes,
     xpc,
 };
 
@@ -28,14 +33,15 @@ struct GlobalOpts {
     #[arg(
         long,
         default_value_t = UsbAddr { vid: 0x0403, pid: 0x6010 },
+        global = true,
     )]
     usb: UsbAddr,
 
-    #[arg(long, default_value = "ftdi")]
+    #[arg(long, default_value = "ftdi", global = true)]
     backend: Backend,
 
     /// Disable the progress bar
-    #[arg(long)]
+    #[arg(long, global = true)]
     no_progress_bar: bool,
 }
 
@@ -78,41 +84,86 @@ struct Program {
 fn main() -> Result<()> {
     init_logging()?;
     let Args { global, command } = Args::parse();
+
+    // no controller
+    if let CliCommand::FlashXpc(flash) = command {
+        return flash_xpc(global.usb, flash);
+    }
+
+    let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
+    if global.no_progress_bar {
+        run(command, &mut cont, None)?;
+    } else {
+        let notify = &AtomicUsize::new(0);
+        let done = &AtomicBool::new(false);
+        let pb = &setup_progress_bar();
+        std::thread::scope(|s| {
+            s.spawn(move || {
+                while !done.load(Ordering::Acquire) {
+                    pb.set_position(notify.load(Ordering::Acquire) as _);
+                }
+            });
+
+            let r = cont.with_notifications(notify, |cont| run(command, cont, Some(pb)));
+            done.store(true, Ordering::Release);
+            r
+        })?;
+    }
+    Ok(())
+}
+
+fn setup_progress_bar() -> indicatif::ProgressBar {
+    let template =
+        "{spinner:.green} {elapsed:>3}/{duration:>3} {bar} {bytes}/{total_bytes} ({bytes_per_sec})";
+    let style = indicatif::ProgressStyle::with_template(template).unwrap();
+    let pb = indicatif::ProgressBar::new(0)
+        .with_finish(indicatif::ProgressFinish::Abandon)
+        .with_style(style);
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+    pb
+}
+
+fn run(
+    command: CliCommand,
+    cont: &mut Controller<Box<dyn BackendTrait + Send>>,
+    pb: Option<&indicatif::ProgressBar>,
+) -> Result<()> {
     match command {
-        // no controller
-        CliCommand::FlashXpc(flash) => {
-            flash_xpc(global.usb, flash)?;
-        }
+        // no controller, handled earlier
+        CliCommand::FlashXpc(_) => unreachable!(),
 
         // controller
         CliCommand::Info => {
-            let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
-            info(&mut cont)?;
+            info(cont)?;
         }
         CliCommand::InfoXadc => {
-            let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
-            info_xadc(&mut cont)?;
+            info_xadc(cont)?;
         }
         CliCommand::Readback(args) => {
-            let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
             let data = match &cont.info().specific {
                 nafa_io::devices::Specific::Unknown => todo!(),
                 nafa_io::devices::Specific::Xilinx32(info) => {
                     let len = info.readback.into();
-                    nafa_xilinx::_32bit::readback(&mut cont, len)?
+                    if let Some(pb) = pb {
+                        pb.set_length(Bytes::from(info.readback).0 as _)
+                    }
+                    nafa_xilinx::_32bit::readback(cont, len)?
                 }
             };
             std::fs::write(args.output_file, data)?;
         }
         CliCommand::Program(args) => {
-            let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
             let mut data = std::fs::read(args.input_file)?;
             for d in &mut data {
                 *d = d.reverse_bits();
             }
-            nafa_xilinx::_32bit::program(&mut cont, &data)?;
+            if let Some(pb) = pb {
+                pb.set_length(data.len() as _)
+            }
+            nafa_xilinx::_32bit::program(cont, &data)?;
         }
     }
+
     Ok(())
 }
 
@@ -144,7 +195,7 @@ fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
 
 fn get_device_ftdi(addr: UsbAddr) -> Result<ftdi::Device> {
     let dev = ::ftdi::find_by_vid_pid(addr.vid, addr.pid).open()?;
-    ftdi::Device::new(dev, &devices::NEXSYS4)
+    ftdi::Device::new(dev, &devices::NEXSYS4, Some(30_000_000))
 }
 
 fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {

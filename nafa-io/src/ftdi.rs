@@ -23,10 +23,13 @@ pub struct Device {
 unsafe impl Send for Device {}
 
 impl Device {
-    pub fn new(mut dev: ftdi::Device, info: &devices::Info) -> Result<Self> {
+    pub fn new(
+        mut dev: ftdi::Device,
+        info: &devices::Info,
+        clock_frequency: Option<u32>,
+    ) -> Result<Self> {
         dev.init(&ftdi_mpsse::MpsseSettings {
-            // max frequency
-            clock_frequency: Some(30_000_000),
+            clock_frequency,
             ..Default::default()
         })?;
         let init_cmd = [
@@ -150,13 +153,13 @@ impl Backend for Device {
                 for chunk in tdi.chunks(MAX_READ_WRITE_LEN) {
                     if read {
                         self.cmd_read_len += chunk.len();
-                        debug!(add = chunk.len());
                     }
                     let len = assert_data_len(chunk.len());
                     self.cmd_buf.push(cmd);
                     self.cmd_buf.push(len as u8);
                     self.cmd_buf.push((len >> 8) as u8);
                     self.cmd_buf.extend_from_slice(chunk);
+                    buf.notify_write(chunk.len());
                     self.maybe_flush(buf)?;
                 }
 
@@ -168,6 +171,7 @@ impl Backend for Device {
                     if read {
                         self.cmd_read_len += 1;
                     }
+                    buf.notify_write(1);
                     last_bit = last & 0x80 != 0;
                 }
             }
