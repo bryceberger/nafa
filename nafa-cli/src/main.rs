@@ -91,9 +91,11 @@ fn main() -> Result<()> {
     }
 
     let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
-    if global.no_progress_bar {
-        run(command, &mut cont, None)?;
-    } else {
+    let progress = match command {
+        CliCommand::Readback(_) | CliCommand::Program(_) => !global.no_progress_bar,
+        _ => false,
+    };
+    if progress {
         let notify = &AtomicUsize::new(0);
         let done = &AtomicBool::new(false);
         let pb = &setup_progress_bar();
@@ -108,6 +110,8 @@ fn main() -> Result<()> {
             done.store(true, Ordering::Release);
             r
         })?;
+    } else {
+        run(command, &mut cont, None)?;
     }
     Ok(())
 }
@@ -233,9 +237,16 @@ fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
 }
 
 fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
-    use nafa_xilinx::_32bit::drp::{
-        Addr, Cmd, Command, adc_bipolar, adc_unipolar, power_supply, temperature,
+    use nafa_xilinx::_32bit::drp::{Addr, Cmd, Command};
+
+    let family = match &cont.info.specific {
+        nafa_io::devices::Specific::Unknown => todo!(),
+        nafa_io::devices::Specific::Xilinx32(info) => info.family,
     };
+
+    println!("idcode: {:04X}", cont.idcode);
+    println!("  name: {}", cont.info.name);
+
     let c = |addr| Command {
         cmd: Cmd::Read,
         addr,
@@ -253,34 +264,41 @@ fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
     ];
     let xadc_regs = nafa_xilinx::_32bit::read_xadc(cont, regs)?;
 
+    let show = |name: &str, addr: Addr, val: u16, unit: &str| {
+        use nafa_xilinx::_32bit::drp::Transfer;
+        const PREC: usize = 3;
+        match addr.transfer(family) {
+            Transfer::None | Transfer::Unknown => println!("{name}: {val:04X}"),
+            Transfer::Exactly(f) => println!("{name}: {val:04X} => {:.PREC$}{unit}", f(val)),
+            Transfer::OneOf(many) => {
+                let mut it = many.iter();
+                if let Some(first) = it.next() {
+                    println!("{name}: {val:04X} => {:.PREC$}{unit}", first(val));
+                }
+                for f in it {
+                    println!(
+                        "{:len$}       => {:.PREC$}{unit}",
+                        "",
+                        f(val),
+                        len = name.len()
+                    );
+                }
+            }
+        }
+    };
+
     if let [_, temp, vccint, vccaux, vpvn, vrefp, vrefn, vcc_bram] = xadc_regs.as_chunks().0 {
         fn x(x: &[u8; 4]) -> u16 {
             u32::from_le_bytes(*x) as u16
         }
-        fn c_to_f(c: f32) -> f32 {
-            (c * 9. / 5.) + 32.
-        }
 
-        let temp_c = temperature(x(temp));
-        let temp_f = c_to_f(temp_c);
-        println!("  temp: {:04X} => {temp_c:.2}C, {temp_f:.2}F", x(temp));
-
-        let vccint_ = power_supply(x(vccint));
-        let vccaux_ = power_supply(x(vccaux));
-        println!("vccint: {:04X} => {vccint_:.3}V", x(vccint));
-        println!("vccaux: {:04X} => {vccaux_:.3}V", x(vccaux));
-
-        let vpvn_u = adc_unipolar(x(vpvn));
-        let vpvn_b = adc_bipolar(x(vpvn));
-        println!("  vpvn: {:04X} => {vpvn_u:.3}V ({vpvn_b:.3}V)", x(vpvn));
-
-        let vrefp_ = power_supply(x(vrefp));
-        let vrefn_ = power_supply(x(vrefn));
-        println!(" vrefp: {:04X} => {vrefp_:.3}V", x(vrefp));
-        println!(" vrefn: {:04X} => {vrefn_:.3}V", x(vrefn));
-
-        let vcc_bram_ = power_supply(x(vcc_bram));
-        println!("  bram: {:04X} => {vcc_bram_:.3}V", x(vcc_bram));
+        show("  temp", Addr::Temperature, x(temp), "F");
+        show("vccint", Addr::VccInt, x(vccint), "V");
+        show("vccaux", Addr::VccAux, x(vccaux), "V");
+        show("  vpvn", Addr::VpVn, x(vpvn), "V");
+        show(" vrefp", Addr::VRefP, x(vrefp), "V");
+        show(" vrefn", Addr::VRefN, x(vrefn), "V");
+        show("  bram", Addr::VccBram, x(vcc_bram), "V");
     }
 
     Ok(())

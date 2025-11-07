@@ -1,3 +1,5 @@
+use nafa_io::devices::Xilinx32Family as Family;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Command {
     pub cmd: Cmd,
@@ -23,9 +25,13 @@ pub enum Cmd {
     Write = 0b10,
 }
 
+/// The descriptions are taken from [UG480] (Series 7). However, the registers
+/// are mostly the same for Ultrascale and Ultrascale+, detailed in [UG580].
+///
 /// [UG480], [Table 3-1]: Status Registers (Read Only)
 ///
 /// [UG480]: https://docs.amd.com/api/khub/maps/qOeib0vlzXa1isUAfuFzOQ/attachments/_mT0t4XmsgJ2qfoNRTv53w-qOeib0vlzXa1isUAfuFzOQ/content
+/// [UG580]: https://www.amd.com/content/dam/xilinx/support/documents/user_guides/ug580-ultrascale-sysmon.pdf
 /// [Table 3-1]: https://docs.amd.com/api/khub/maps/qOeib0vlzXa1isUAfuFzOQ/attachments/_mT0t4XmsgJ2qfoNRTv53w-qOeib0vlzXa1isUAfuFzOQ/content#G6.307934
 #[repr(u16)]
 #[derive(Clone, Copy, Debug)]
@@ -223,20 +229,132 @@ pub enum Addr {
     /// [Flag Register]: https://docs.amd.com/api/khub/maps/qOeib0vlzXa1isUAfuFzOQ/attachments/_mT0t4XmsgJ2qfoNRTv53w-qOeib0vlzXa1isUAfuFzOQ/content#G6.301009
     Flag = 0x3f,
 }
-pub fn temperature(data: u16) -> f32 {
+
+pub enum Transfer {
+    None,
+    Unknown,
+    Exactly(fn(u16) -> f32),
+    OneOf(&'static [fn(u16) -> f32]),
+}
+
+impl Addr {
+    pub fn transfer(self, family: Family) -> Transfer {
+        match self {
+            Addr::Temperature | Addr::MaxTemp | Addr::MinTemp => temperature(family),
+
+            Addr::VccInt
+            | Addr::VccAux
+            | Addr::VRefP
+            | Addr::VRefN
+            | Addr::VccBram
+            | Addr::VccPInt
+            | Addr::VccPAux
+            | Addr::VccODdr
+            | Addr::MaxVccInt
+            | Addr::MaxVccAux
+            | Addr::MinVccInt
+            | Addr::MinVccAux
+            | Addr::MinVccBram
+            | Addr::VccPIntMax
+            | Addr::VccPAuxMax
+            | Addr::VccODdrMax
+            | Addr::VccPIntMin
+            | Addr::VccPAuxMin
+            | Addr::VccODdrMin => power_supply(family),
+
+            Addr::VpVn
+            | Addr::VAuxPVAuxN0
+            | Addr::VAuxPVAuxN1
+            | Addr::VAuxPVAuxN2
+            | Addr::VAuxPVAuxN3
+            | Addr::VAuxPVAuxN4
+            | Addr::VAuxPVAuxN5
+            | Addr::VAuxPVAuxN6
+            | Addr::VAuxPVAuxN7
+            | Addr::VAuxPVAuxN8
+            | Addr::VAuxPVAuxN9
+            | Addr::VAuxPVAuxNA
+            | Addr::VAuxPVAuxNB
+            | Addr::VAuxPVAuxNC
+            | Addr::VAuxPVAuxND
+            | Addr::VAuxPVAuxNE
+            | Addr::VAuxPVAuxNF => Transfer::OneOf(&[adc_unipolar_s7, adc_bipolar_s7]),
+
+            _ => Transfer::None,
+        }
+    }
+}
+
+pub fn temperature(family: Family) -> Transfer {
+    const _2_10: f32 = (2 << (10 - 1)) as f32;
+    match family {
+        Family::S7 => Transfer::Exactly(temperature_s7),
+        Family::US => Transfer::OneOf(&[
+            |d| linear_scale_10(d, -273.8195, 502.9098 / _2_10), // sysmone1, external ref
+            |d| linear_scale_10(d, -273.6777, 501.3743 / _2_10), // sysmone1, internal ref
+        ]),
+        Family::UP => Transfer::OneOf(&[
+            |d| linear_scale_10(d, -273.8195, 502.9098 / _2_10), // sysmone1, external ref
+            |d| linear_scale_10(d, -273.6777, 501.3743 / _2_10), // sysmone1, internal ref
+            |d| linear_scale_10(d, -279.4266, 507.5921 / _2_10), // sysmone4, external ref
+            |d| linear_scale_10(d, -280.2309, 509.3141 / _2_10), // sysmone4, internal ref
+        ]),
+        Family::Z7 | Family::ZP | Family::Versal => Transfer::Unknown,
+    }
+}
+
+pub fn power_supply(family: Family) -> Transfer {
+    match family {
+        Family::S7 => Transfer::Exactly(power_supply_s7),
+        Family::US | Family::UP => Transfer::Exactly(power_supply_us),
+        Family::Z7 | Family::ZP | Family::Versal => Transfer::Unknown,
+    }
+}
+
+pub fn adc(family: Family) -> Transfer {
+    match family {
+        Family::S7 => Transfer::OneOf(&[adc_unipolar_s7, adc_bipolar_s7]),
+        Family::US | Family::UP => Transfer::OneOf(&[adc_unipolar_us, adc_bipolar_us]),
+        Family::Z7 | Family::ZP | Family::Versal => Transfer::Unknown,
+    }
+}
+
+pub fn power_supply_us(data: u16) -> f32 {
+    linear_scale_10(data, 0., 0.00293)
+}
+
+pub fn temperature_s7(data: u16) -> f32 {
     linear_scale_12(data, -273., 0.123)
 }
 
-pub fn power_supply(data: u16) -> f32 {
+pub fn power_supply_s7(data: u16) -> f32 {
     linear_scale_12(data, 0., 0.000732)
 }
 
-pub fn adc_unipolar(data: u16) -> f32 {
+pub fn adc_unipolar_us(data: u16) -> f32 {
+    linear_scale_10(data, 0., 1. / 1024.)
+}
+
+pub fn adc_bipolar_us(data: u16) -> f32 {
+    linear_scale_10_signed(data, 0., 1. / 1024.)
+}
+
+pub fn adc_unipolar_s7(data: u16) -> f32 {
     linear_scale_12(data, 0., 1. / 4096.)
 }
 
-pub fn adc_bipolar(data: u16) -> f32 {
+pub fn adc_bipolar_s7(data: u16) -> f32 {
     linear_scale_12_signed(data, 0., 1. / 4096.)
+}
+
+fn linear_scale_10(data: u16, base: f32, step: f32) -> f32 {
+    let val = (data >> 6) as f32;
+    val.mul_add(step, base)
+}
+
+fn linear_scale_10_signed(data: u16, base: f32, step: f32) -> f32 {
+    let val = (data as i16 >> 6) as f32;
+    val.mul_add(step, base)
 }
 
 fn linear_scale_12(data: u16, base: f32, step: f32) -> f32 {

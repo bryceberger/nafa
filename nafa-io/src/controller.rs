@@ -15,6 +15,7 @@ use crate::{
 
 pub struct Controller<B> {
     backend: B,
+    pub idcode: u32,
     pub info: DeviceInfo,
     notify: Option<std::ptr::NonNull<AtomicUsize>>,
     buf: Vec<u8>,
@@ -36,10 +37,10 @@ impl<B: Backend> Controller<B> {
         if u32::from_le_bytes(*extra) & 0xffff_ff00 != 0xffff_ff00 {
             return Err(eyre!("multiple devices detected on jtag chain"));
         }
-        let id = u32::from_le_bytes(*id);
+        let idcode = u32::from_le_bytes(*id);
         let info = devices
-            .get(&id)
-            .ok_or_else(|| eyre!("idcode {id:08X} not found in device list"))?
+            .get(&idcode)
+            .ok_or_else(|| eyre!("idcode {idcode:08X} not found in device list"))?
             .clone();
         assert!(info.irlen.0 <= 32);
 
@@ -48,6 +49,7 @@ impl<B: Backend> Controller<B> {
             backend,
             buf,
             info,
+            idcode,
             notify: None,
         })
     }
@@ -79,6 +81,7 @@ impl<B: Backend> Controller<B> {
             buf,
             info,
             notify,
+            idcode: _,
         } = self;
         let notify = notify.map(|n| unsafe { n.as_ref() });
         buf.clear();
