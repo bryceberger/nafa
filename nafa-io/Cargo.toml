@@ -12,3 +12,6 @@ ftdi.workspace = true
 rusb.workspace = true
 strum = { workspace = true, features = ["derive"] }
 tracing.workspace = true
+
+[dev-dependencies]
+insta = "1.43.2"
