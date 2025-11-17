@@ -1,6 +1,7 @@
 mod backend;
 mod controller;
 pub mod devices;
+pub mod fake_backend;
 pub mod ftdi;
 pub mod jtag;
 pub mod units;
