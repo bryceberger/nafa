@@ -8,7 +8,7 @@ use clap::Parser;
 use color_eyre::{Result, eyre::eyre};
 use nafa_io::{
     Backend as BackendTrait, Command, Controller, ShortHex,
-    devices::DeviceInfo,
+    devices::{DeviceInfo, IdCode},
     ftdi::{self, devices},
     units::Bytes,
     xpc,
@@ -169,13 +169,13 @@ fn run(
     Ok(())
 }
 
-fn get_devices() -> HashMap<u32, DeviceInfo> {
+fn get_devices() -> HashMap<IdCode, DeviceInfo> {
     nafa_io::devices::builtin().collect()
 }
 
 fn get_controller(
     backend: Backend,
-    devices: &HashMap<u32, DeviceInfo>,
+    devices: &HashMap<IdCode, DeviceInfo>,
     addr: UsbAddr,
 ) -> Result<Controller<Box<dyn BackendTrait + Send>>> {
     let backend: Box<dyn BackendTrait + Send> = match backend {

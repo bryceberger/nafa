@@ -8,7 +8,7 @@ use eyre::{Result, eyre};
 use crate::{
     Backend, Buffer,
     backend::Data,
-    devices::DeviceInfo,
+    devices::{DeviceInfo, IdCode},
     jtag::{self, PATHS, State},
     units::Bytes,
 };
@@ -22,7 +22,7 @@ pub struct Controller<B> {
 }
 
 impl<B: Backend> Controller<B> {
-    pub fn new(mut backend: B, devices: &HashMap<u32, DeviceInfo>) -> Result<Self> {
+    pub fn new(mut backend: B, devices: &HashMap<IdCode, DeviceInfo>) -> Result<Self> {
         let mut buf = Vec::new();
         backend.tms(&mut buf, jtag::Path::RESET)?;
         backend.tms(&mut buf, jtag::Path::RESET)?;
@@ -39,7 +39,7 @@ impl<B: Backend> Controller<B> {
         }
         let idcode = u32::from_le_bytes(*id);
         let info = devices
-            .get(&idcode)
+            .get(&IdCode::new(idcode))
             .ok_or_else(|| eyre!("idcode {idcode:08X} not found in device list"))?
             .clone();
         assert!(info.irlen.0 <= 32);
