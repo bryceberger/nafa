@@ -207,13 +207,17 @@ fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {
 }
 
 fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
-    use nafa_xilinx::_32bit::registers::{Addr, OpCode, Type1};
-    for (name, cmd) in [
-        ("idcode", nafa_xilinx::_32bit::commands::IDCODE),
-        ("fuse_key", nafa_xilinx::_32bit::commands::FUSE_KEY),
-        ("fuse_dna", nafa_xilinx::_32bit::commands::FUSE_DNA),
+    use nafa_xilinx::_32bit::{
+        commands::{FUSE_DNA, FUSE_KEY, IDCODE},
+        registers::{Addr, OpCode, Type1},
+    };
+
+    for (name, cmd, len) in [
+        ("idcode", IDCODE, Bytes(4)),
+        ("fuse_dna", FUSE_DNA, Bytes(8)),
+        ("fuse_key", FUSE_KEY, Bytes(32)),
     ] {
-        let data = cont.run([Command::ir(cmd.val as _), Command::dr_rx(cmd.read_len)])?;
+        let data = cont.run([Command::ir(cmd.into()), Command::dr_rx(len)])?;
         println!("{:>12}: {}", name, ShortHex(data));
     }
     let x = |addr| Type1::new(OpCode::Read, addr, 1);
