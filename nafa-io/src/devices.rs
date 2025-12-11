@@ -4,27 +4,27 @@ use crate::units::{Bits, Words32};
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IdCode(u32);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DeviceInfo {
     pub irlen: Bits<u8>,
     pub name: &'static str,
     pub specific: Specific,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Specific {
     Unknown,
     Xilinx32(Xilinx32Info),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Xilinx32Info {
     pub family: Xilinx32Family,
     pub slr: u8,
     pub readback: Words32<usize>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Xilinx32Family {
     /// 7-series
     S7,

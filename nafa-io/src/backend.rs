@@ -5,6 +5,7 @@ use crate::{
     units::{Bits, Bytes},
 };
 
+#[derive(Clone, Copy)]
 pub enum Data<'d> {
     Tx(&'d [u8]),
     Rx(Bytes<usize>),
