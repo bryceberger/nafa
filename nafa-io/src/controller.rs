@@ -9,8 +9,8 @@ use crate::{
     Backend, Buffer,
     backend::Data,
     devices::{DeviceInfo, IdCode},
-    jtag::{self, PATHS, State},
-    units::Bytes,
+    jtag::{PATHS, Path, State},
+    units::{Bits, Bytes},
 };
 
 pub struct Controller<B> {
@@ -21,35 +21,124 @@ pub struct Controller<B> {
     buf: Vec<u8>,
 }
 
+async fn detect_chain<B: Backend>(
+    backend: &mut B,
+    devices: &HashMap<IdCode, DeviceInfo>,
+) -> Result<Vec<(u32, DeviceInfo)>> {
+    let buf = &mut Vec::new();
+    let reset_to_idle = PATHS[State::TestLogicReset][State::RunTestIdle];
+    backend.tms(buf, Path::RESET).await?;
+    backend.tms(buf, reset_to_idle).await?;
+
+    let idle_to_sdr = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
+    let sdr_to_idle = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
+
+    let get_info = |idcode| -> Result<DeviceInfo> {
+        let Some(info) = devices.get(&IdCode::new(idcode)) else {
+            return Err(eyre!("idcode {idcode:08X} not found in device list"));
+        };
+        assert!(info.irlen <= Bits(32));
+        Ok(info.clone())
+    };
+
+    let mut ret = Vec::new();
+    loop {
+        let to_read = Bytes((ret.len() + 1) * 4);
+        backend
+            .bytes(buf, idle_to_sdr, Data::Rx(to_read), sdr_to_idle)
+            .await?;
+        backend.flush(buf).await?;
+
+        let (ids, []) = buf.as_chunks() else {
+            return Err(eyre!(
+                "failed to fill idcode, or returned extra data: {buf:02X?}"
+            ));
+        };
+        let id = ids[ret.len()];
+        match u32::from_le_bytes(id) {
+            // reached end of chain
+            0xffff_ffff => {
+                break;
+            }
+
+            // special case for Zynq US+: add ARM_DAP to the chain
+            idcode if idcode & 0xfff == (0x093 << 1) && ret.is_empty() => {
+                buf.clear();
+                let idcode = zynq_us_init_arm_dap(backend, buf).await?;
+                let info = get_info(idcode)?;
+                ret.push((idcode, info.clone()));
+            }
+
+            // IDCODE guaranteed to start with a `1` bit, BYPASS as a single `0`. Nothing we can
+            // really do with a device in BYPASS. Could scan a pattern through IR until we see our
+            // input fed back, but that's annoying. All devices we care about start with IDCODE
+            // anyway.
+            idcode if idcode & 1 != 1 => {
+                return Err(eyre!("device in BYPASS detected: {idcode:08X}",));
+            }
+
+            idcode => {
+                let info = get_info(idcode)?;
+                ret.push((idcode, info.clone()));
+            }
+        }
+        buf.clear();
+    }
+
+    Ok(ret)
+}
+
+async fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) -> Result<u32> {
+    let reset_to_sir = Some(PATHS[State::TestLogicReset][State::ShiftIR]);
+    let sir_to_idle = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
+    let idle_to_sdr = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
+    let sdr_to_reset = Some(PATHS[State::ShiftDR][State::TestLogicReset]);
+    let reset_to_sdr = Some(PATHS[State::TestLogicReset][State::ShiftDR]);
+    let sdr_to_idle = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
+
+    let jtag_ctrl = 0b100000 << (4 + 6) | 0b100100 << 4 | 0b1111;
+    let ones = Data::ConstantTx(true, Bytes(4));
+    let rx_4 = Data::Rx(Bytes(4));
+
+    backend.tms(buf, Path::RESET).await?;
+    backend
+        .bits(buf, reset_to_sir, jtag_ctrl, Bits(16), sir_to_idle)
+        .await?;
+    backend.bytes(buf, idle_to_sdr, ones, sdr_to_reset).await?;
+    backend.bytes(buf, reset_to_sdr, ones, sdr_to_reset).await?;
+    backend.bytes(buf, reset_to_sdr, rx_4, sdr_to_idle).await?;
+    backend.flush(buf).await?;
+
+    let ([id], []) = buf.as_chunks() else {
+        return Err(eyre!("failed to get idcode after zynq us special case"));
+    };
+    match u32::from_le_bytes(*id) {
+        0xffff_ffff => Err(eyre!("end of chain after zynq us special case ???")),
+        idcode if idcode & 1 != 1 => Err(eyre!("still in bypass after zynq us special case")),
+        idcode => Ok(idcode),
+    }
+}
+
 impl<B: Backend> Controller<B> {
     pub async fn new(mut backend: B, devices: &HashMap<IdCode, DeviceInfo>) -> Result<Self> {
-        let mut buf = Vec::new();
-        backend.tms(&mut buf, jtag::Path::RESET).await?;
-        backend.tms(&mut buf, jtag::Path::RESET).await?;
-        let before = Some(jtag::PATHS[State::TestLogicReset][State::ShiftDR]);
-        let after = Some(jtag::PATHS[State::ShiftDR][State::RunTestIdle]);
-        backend
-            .bytes(&mut buf, before, Data::Rx(Bytes(8)), after)
-            .await?;
-        backend.flush(&mut buf).await?;
-
-        let [id, extra] = buf.as_chunks().0 else {
-            return Err(eyre!("backend failed to fill buffer"));
+        let (idcode, info) = match &detect_chain(&mut backend, devices).await?[..] {
+            [single] => single.clone(),
+            [] => {
+                return Err(eyre!("no devices detected on jtag chain"));
+            }
+            multiple => {
+                let idcodes = multiple
+                    .iter()
+                    .map(|(idcode, _)| idcode)
+                    .collect::<Vec<_>>();
+                return Err(eyre!(
+                    "multiple devices detected on jtag chain: {idcodes:08X?}"
+                ));
+            }
         };
-        if u32::from_le_bytes(*extra) & 0xffff_ff00 != 0xffff_ff00 {
-            return Err(eyre!("multiple devices detected on jtag chain"));
-        }
-        let idcode = u32::from_le_bytes(*id);
-        let info = devices
-            .get(&IdCode::new(idcode))
-            .ok_or_else(|| eyre!("idcode {idcode:08X} not found in device list"))?
-            .clone();
-        assert!(info.irlen.0 <= 32);
-
-        buf.clear();
         Ok(Self {
             backend,
-            buf,
+            buf: Vec::new(),
             info,
             idcode,
             notify: None,
@@ -74,7 +163,7 @@ impl<B: Backend> Controller<B> {
     /// Run a set of commands, returning the data read out of TDO.
     ///
     /// Before the first command is run, the JTAG will be in
-    /// [`jtag::State::RunTestIdle`].
+    /// [`State::RunTestIdle`].
     ///
     /// When IO occurs, the number of bytes read is sent over `sender`.
     pub async fn run<'d>(
@@ -125,7 +214,7 @@ impl<B: Backend> Controller<B> {
             _ => buf,
         };
 
-        backend.tms(buf, jtag::Path::IDLE).await?;
+        backend.tms(buf, Path::IDLE).await?;
         backend.flush(buf).await?;
         Ok(&self.buf)
     }
