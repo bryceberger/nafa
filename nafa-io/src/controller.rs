@@ -16,12 +16,14 @@ use crate::{
 pub struct Controller<B> {
     backend: B,
     pub idcode: u32,
+    before: Vec<DeviceInfo>,
     pub info: DeviceInfo,
+    after: Vec<DeviceInfo>,
     notify: Option<std::ptr::NonNull<AtomicUsize>>,
     buf: Vec<u8>,
 }
 
-fn detect_chain<B: Backend>(
+pub fn detect_chain<B: Backend>(
     backend: &mut B,
     devices: &HashMap<IdCode, DeviceInfo>,
 ) -> Result<Vec<(u32, DeviceInfo)>> {
@@ -116,26 +118,23 @@ fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) -> Resul
 }
 
 impl<B: Backend> Controller<B> {
-    pub fn new(mut backend: B, devices: &HashMap<IdCode, DeviceInfo>) -> Result<Self> {
-        let (idcode, info) = match &detect_chain(&mut backend, devices)?[..] {
-            [single] => single.clone(),
-            [] => {
-                return Err(eyre!("no devices detected on jtag chain"));
-            }
-            multiple => {
-                let idcodes = multiple
-                    .iter()
-                    .map(|(idcode, _)| idcode)
-                    .collect::<Vec<_>>();
-                return Err(eyre!(
-                    "multiple devices detected on jtag chain: {idcodes:08X?}"
-                ));
-            }
-        };
+    pub fn new(
+        mut backend: B,
+        before: Vec<DeviceInfo>,
+        (idcode, info): (u32, DeviceInfo),
+        after: Vec<DeviceInfo>,
+    ) -> Result<Self> {
+        let mut buf = Vec::new();
+        backend.tms(&mut buf, Path::RESET)?;
+        backend.flush(&mut buf)?;
+        buf.clear();
+
         Ok(Self {
             backend,
-            buf: Vec::new(),
+            buf,
+            before,
             info,
+            after,
             idcode,
             notify: None,
         })
@@ -166,17 +165,24 @@ impl<B: Backend> Controller<B> {
         let Self {
             backend,
             buf,
+            before,
             info,
+            after,
             notify,
             idcode: _,
         } = self;
         let notify = notify.map(|n| unsafe { n.as_ref() });
         buf.clear();
 
-        let ir0 = Some(PATHS[State::RunTestIdle][State::ShiftIR]);
-        let ir1 = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
-        let dr0 = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
-        let dr1 = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
+        let irlen_before: Bits<u8> = Bits(before.iter().map(|i| i.irlen.0).sum());
+        let irlen_after: Bits<u8> = Bits(after.iter().map(|i| i.irlen.0).sum());
+
+        let devices_before = before.len();
+        let devices_after = after.len();
+        assert!(devices_before <= 32);
+        assert!(devices_after <= 32);
+        let devices_before = devices_before as u8;
+        let devices_after = devices_after as u8;
 
         let mut last_noisy = false;
         for command in commands {
@@ -186,12 +192,20 @@ impl<B: Backend> Controller<B> {
                 _ => buf,
             };
             match command.inner {
-                CommandInner::IrTxBits { tdi } => backend.bits(buf, ir0, tdi, info.irlen, ir1)?,
-                CommandInner::DrTx { tdi } => backend.bytes(buf, dr0, Data::Tx(tdi), dr1)?,
-                CommandInner::DrRx { len } => backend.bytes(buf, dr0, Data::Rx(len), dr1)?,
-                CommandInner::DrTxRx { tdi } => backend.bytes(buf, dr0, Data::TxRx(tdi), dr1)?,
+                CommandInner::IrTxBits { tdi } => {
+                    io_bits(backend, buf, info, irlen_before, irlen_after, tdi)?
+                }
+                CommandInner::DrTx { tdi } => {
+                    io_bytes(backend, buf, devices_before, devices_after, Data::Tx(tdi))?
+                }
+                CommandInner::DrRx { len } => {
+                    io_bytes(backend, buf, devices_before, devices_after, Data::Rx(len))?
+                }
+                CommandInner::DrTxRx { tdi } => {
+                    io_bytes(backend, buf, devices_before, devices_after, Data::TxRx(tdi))?
+                }
                 CommandInner::Idle { len } => {
-                    backend.bytes(buf, None, Data::ConstantTx(false, len), None)?
+                    backend.bytes(buf, None, Data::ConstantTx(true, len), None)?
                 }
             }
         }
@@ -205,6 +219,70 @@ impl<B: Backend> Controller<B> {
         backend.flush(buf)?;
         Ok(&self.buf)
     }
+}
+
+fn io_bits<B: Backend>(
+    backend: &mut B,
+    buf: &mut dyn Buffer,
+    info: &DeviceInfo,
+    irlen_before: Bits<u8>,
+    irlen_after: Bits<u8>,
+    tdi: u32,
+) -> Result<()> {
+    let ir0 = Some(PATHS[State::RunTestIdle][State::ShiftIR]);
+    let ir1 = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
+
+    match (irlen_before, irlen_after) {
+        (Bits(0), Bits(0)) => {
+            backend.bits(buf, ir0, tdi, info.irlen, ir1)?;
+        }
+        (post, Bits(0)) => {
+            backend.bits(buf, ir0, tdi, info.irlen, None)?;
+            backend.bits(buf, None, u32::MAX, post, ir1)?;
+        }
+        (Bits(0), pre) => {
+            backend.bits(buf, ir0, u32::MAX, pre, None)?;
+            backend.bits(buf, None, tdi, info.irlen, ir1)?;
+        }
+        (post, pre) => {
+            backend.bits(buf, ir0, u32::MAX, pre, None)?;
+            backend.bits(buf, None, tdi, info.irlen, None)?;
+            backend.bits(buf, None, u32::MAX, post, ir1)?;
+        }
+    }
+    Ok(())
+}
+
+fn io_bytes<B: Backend>(
+    backend: &mut B,
+    buf: &mut dyn Buffer,
+    devices_before: u8,
+    devices_after: u8,
+    data: Data<'_>,
+) -> Result<()> {
+    let dr0 = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
+    let dr1 = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
+
+    match (devices_before, devices_after) {
+        (0, 0) => {
+            backend.bytes(buf, dr0, data, dr1)?;
+        }
+        (post, 0) => {
+            backend.bytes(buf, dr0, data, None)?;
+            backend.bits(buf, None, u32::MAX, Bits(post), dr1)?;
+        }
+        (0, pre) => {
+            backend.bits(buf, dr0, u32::MAX, Bits(pre), None)?;
+            backend.bytes(buf, None, data, dr1)?;
+        }
+        (post, pre) => {
+            backend.bits(buf, dr0, u32::MAX, Bits(pre), None)?;
+            backend.bytes(buf, None, data, None)?;
+            backend.bits(buf, None, u32::MAX, Bits(post), dr1)?;
+        }
+    }
+
+    Ok(())
 }
 
 struct NoisyBuffer<'d> {
