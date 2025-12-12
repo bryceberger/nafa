@@ -44,9 +44,6 @@ fn determine_max_packet_size(iface: &nusb::Interface) -> usize {
 impl Device {
     #[tracing::instrument(skip_all)]
     pub async fn new(handle: nusb::Device, interface: Interface) -> Result<Self> {
-        let desc = handle.device_descriptor();
-        assert_eq!(desc.device_version(), 0x0700, "only ft2232h supported");
-
         let _ = handle.detach_kernel_driver(interface.interface());
         let iface = handle.claim_interface(interface.interface()).await?;
         let packet_size = determine_max_packet_size(&iface);

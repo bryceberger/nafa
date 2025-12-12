@@ -167,11 +167,44 @@ async fn get_controller(
     addr: UsbAddr,
 ) -> Result<Controller<Box<dyn BackendTrait>>> {
     let device = get_device(addr).await?;
-    let backend = match nafa_io::cables::init(device).await {
+    let mut backend = match nafa_io::cables::init(device).await {
         Ok(b) => b,
         Err(errs) => return Err(eyre::eyre!("{:?}", errs)),
     };
-    Controller::new(backend, devices).await
+    let devices = nafa_io::detect_chain(&mut backend, devices).await?;
+    let (before, device, after) = match &devices[..] {
+        [] => return Err(eyre::eyre!("no devices detected on jtag chain")),
+        [single] => (vec![], single.clone(), vec![]),
+        multiple => {
+            struct DisplayableInfo {
+                idx: usize,
+                idcode: u32,
+                name: &'static str,
+            }
+            impl std::fmt::Display for DisplayableInfo {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{:08X} {}", self.idcode, self.name)
+                }
+            }
+            let options = multiple.iter().enumerate();
+            let options = options.map(|(idx, (idcode, info))| DisplayableInfo {
+                idx,
+                idcode: *idcode,
+                name: info.name,
+            });
+            // TODO: options for selecting this other than inquire (like a flag)
+            let DisplayableInfo { idx, .. } =
+                inquire::Select::new("choose device", options.collect()).prompt()?;
+
+            let collect =
+                |items: &[(u32, DeviceInfo)]| items.iter().map(|(_, info)| info.clone()).collect();
+            let before = collect(&multiple[..idx]);
+            let chosen = multiple[idx].clone();
+            let after = collect(&multiple[idx + 1..]);
+            (before, chosen, after)
+        }
+    };
+    Controller::new(backend, before, device, after).await
 }
 
 async fn get_device(addr: UsbAddr) -> Result<nusb::DeviceInfo> {
@@ -195,20 +228,38 @@ async fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
 
 async fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
     use nafa_xilinx::_32bit::{
-        commands::{FUSE_DNA, FUSE_KEY, IDCODE},
+        commands::{FUSE_DNA, FUSE_KEY, FUSE_USER, FUSE_USER_128, IDCODE, USERCODE},
         registers::{Addr, OpCode, Type1},
     };
 
+    // TODO: zynq needs this to be replicated, or it spits out garbage
+    //
+    // specifically:
+    // strategy     idcode  efuse
+    // noop low       ✕       ✕
+    // noop high      ✕       ✓
+    // bypass low     ✓       ✕
+    // bypass high    ✕       ✓
+    // replicated     ✓       ✓
+    //
+    // I _assume_ this has something to do with 6 of the bits being for the
+    // processor and 6 for the FPGA. Need to check docs to figure out exact scheme
+    // for that, and if there's any info about this.
+    let x = |cmd: u8| u32::from(cmd) << 6 | u32::from(cmd);
     for (name, cmd, len) in [
-        ("idcode", IDCODE, Bytes(4)),
-        ("fuse_dna", FUSE_DNA, Bytes(8)),
-        ("fuse_key", FUSE_KEY, Bytes(32)),
+        ("idcode", x(IDCODE), Bytes(4)),
+        ("usercode", x(USERCODE), Bytes(4)),
+        // TODO: length of fuse_dna is 64 bits on S7, 96 on US(+)
+        ("fuse_dna", x(FUSE_DNA), Bytes(12)),
+        ("fuse_key", x(FUSE_KEY), Bytes(32)),
+        ("fuse_user", x(FUSE_USER), Bytes(4)),
+        // TODO: this register is not available on S7
+        ("fuse_user_128", x(FUSE_USER_128), Bytes(16)),
     ] {
-        let data = cont
-            .run([Command::ir(cmd.into()), Command::dr_rx(len)])
-            .await?;
-        println!("{:>12}: {}", name, ShortHex(data));
+        let data = cont.run([Command::ir(cmd), Command::dr_rx(len)]).await?;
+        println!("{:>15}: {}", name, ShortHex(data));
     }
+
     let x = |addr| Type1::new(OpCode::Read, addr, Words32(1));
     let regs = [
         ("boot_status", x(Addr::Bootsts)),
@@ -221,8 +272,7 @@ async fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
     ];
     for (name, reg) in regs {
         let out = nafa_xilinx::_32bit::read_register(cont, reg).await?;
-        let data = u32::from_le_bytes(out.try_into().unwrap());
-        println!("{name:>12}: {:08X} ({:08X})", data, data.reverse_bits());
+        println!("{name:>15}: {}", ShortHex(out));
     }
     Ok(())
 }

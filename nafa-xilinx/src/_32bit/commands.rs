@@ -28,6 +28,7 @@ mod internal {
     pub const FUSE_KEY:        u8 = 0b110001; // PRIVATE
     pub const FUSE_DNA:        u8 = 0b110010; // PRIVATE
     pub const FUSE_USER:       u8 = 0b110011; // PRIVATE
+    pub const FUSE_USER_128:   u8 = 0b011001; // PRIVATE
     pub const FUSE_CNTL:       u8 = 0b110100; // PRIVATE
     pub const USER1:           u8 = 0b000010; // Not available until after configuration
     pub const USER2:           u8 = 0b000011; // Not available until after configuration

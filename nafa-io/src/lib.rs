@@ -10,6 +10,6 @@ pub mod xpc;
 
 pub use crate::{
     backend::{Backend, Buffer, Data},
-    controller::{Command, Controller},
+    controller::{Command, Controller, detect_chain},
     utils::{Hex, ShortHex, SpaceHex},
 };
