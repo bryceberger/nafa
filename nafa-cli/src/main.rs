@@ -178,11 +178,44 @@ fn get_controller(
     devices: &HashMap<IdCode, DeviceInfo>,
     addr: UsbAddr,
 ) -> Result<Controller<Box<dyn BackendTrait>>> {
-    let backend: Box<dyn BackendTrait> = match backend {
+    let mut backend: Box<dyn BackendTrait> = match backend {
         Backend::Ftdi => Box::new(get_device_ftdi(addr)?),
         Backend::Xpc => Box::new(get_device_xpc(addr)?),
     };
-    Controller::new(backend, devices)
+    let devices = nafa_io::detect_chain(&mut backend, devices)?;
+    let (before, device, after) = match &devices[..] {
+        [] => return Err(eyre!("no devices detected on jtag chain")),
+        [single] => (vec![], single.clone(), vec![]),
+        multiple => {
+            struct DisplayableInfo {
+                idx: usize,
+                idcode: u32,
+                name: &'static str,
+            }
+            impl std::fmt::Display for DisplayableInfo {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{:08X} {}", self.idcode, self.name)
+                }
+            }
+            let options = multiple.iter().enumerate();
+            let options = options.map(|(idx, (idcode, info))| DisplayableInfo {
+                idx,
+                idcode: *idcode,
+                name: info.name,
+            });
+            // TODO: options for selecting this other than inquire (like a flag)
+            let DisplayableInfo { idx, .. } =
+                inquire::Select::new("choose device", options.collect()).prompt()?;
+
+            let collect =
+                |items: &[(u32, DeviceInfo)]| items.iter().map(|(_, info)| info.clone()).collect();
+            let before = collect(&multiple[..idx]);
+            let chosen = multiple[idx].clone();
+            let after = collect(&multiple[idx + 1..]);
+            (before, chosen, after)
+        }
+    };
+    Controller::new(backend, before, device, after)
 }
 
 fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
