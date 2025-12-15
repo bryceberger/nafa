@@ -6,6 +6,7 @@ use nafa_io::{
 
 pub mod commands;
 pub mod drp;
+mod info;
 pub mod registers;
 
 use self::registers::Type1;
