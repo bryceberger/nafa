@@ -1,5 +1,8 @@
 use eyre::Result;
-use nafa_io::{Backend, Command, Controller, units::Bytes};
+use nafa_io::{
+    Backend, Command, Controller,
+    units::{Bytes, Words32},
+};
 
 pub mod commands;
 pub mod drp;
@@ -15,7 +18,7 @@ pub fn read_register<B: Backend>(cont: &mut Controller<B>, reg: Type1) -> Result
         Command::ir(commands::CFG_IN as _),
         Command::dr_tx(tiny_bitstream),
         Command::ir(commands::CFG_OUT as _),
-        Command::dr_rx(Bytes(4)),
+        Command::dr_rx(Bytes::from(reg.word_count.map(|x| x.into()))),
     ])
 }
 
@@ -49,11 +52,11 @@ pub fn readback<B: Backend + Send>(cont: &mut Controller<B>, len: Bytes<usize>) 
     let readback = [
         Type1::SYNC,
         Type1::NOOP,
-        Type1::new(OpCode::Write, Addr::Cmd, 1).to_raw(),
+        Type1::new(OpCode::Write, Addr::Cmd, Words32(1)).to_raw(),
         0x0000_0004, // rcfg
-        Type1::new(OpCode::Write, Addr::Far, 1).to_raw(),
+        Type1::new(OpCode::Write, Addr::Far, Words32(1)).to_raw(),
         0x0000_0000,
-        Type1::new(OpCode::Read, Addr::Fdro, 0).to_raw(),
+        Type1::new(OpCode::Read, Addr::Fdro, Words32(0)).to_raw(),
         type2(OpCode::Read, 0xffffff),
         Type1::NOOP,
         Type1::NOOP,

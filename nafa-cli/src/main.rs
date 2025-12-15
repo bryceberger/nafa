@@ -10,7 +10,7 @@ use nafa_io::{
     Backend as BackendTrait, Command, Controller, ShortHex,
     devices::{DeviceInfo, IdCode},
     ftdi::{self, devices},
-    units::Bytes,
+    units::{Bytes, Words32},
     xpc,
 };
 
@@ -220,7 +220,7 @@ fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
         let data = cont.run([Command::ir(cmd.into()), Command::dr_rx(len)])?;
         println!("{:>12}: {}", name, ShortHex(data));
     }
-    let x = |addr| Type1::new(OpCode::Read, addr, 1);
+    let x = |addr| Type1::new(OpCode::Read, addr, Words32(1));
     let regs = [
         ("boot_status", x(Addr::Bootsts)),
         ("cfg_status", x(Addr::Stat)),

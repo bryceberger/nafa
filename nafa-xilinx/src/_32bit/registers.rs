@@ -1,12 +1,14 @@
+use nafa_io::units::Words32;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Type1 {
     pub op: OpCode,
     pub addr: Addr,
-    pub word_count: u16,
+    pub word_count: Words32<u16>,
 }
 
 impl Type1 {
-    pub const fn new(op: OpCode, addr: Addr, word_count: u16) -> Self {
+    pub const fn new(op: OpCode, addr: Addr, word_count: Words32<u16>) -> Self {
         Self {
             op,
             addr,
@@ -65,7 +67,7 @@ impl Type1 {
         let header = 1 << 29;
         let opcode = (((self.op as u8) & 0x3) as u32) << 27;
         let address = (((self.addr as u16) & 0x3fff) as u32) << 13;
-        let word_count = (self.word_count & 0x3ff) as u32;
+        let word_count = (self.word_count.0 & 0x3ff) as u32;
         header | opcode | address | word_count
     }
 

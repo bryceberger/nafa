@@ -40,3 +40,19 @@ where
         (Bytes(self.0 / 8), Bits(self.0 % 8))
     }
 }
+
+impl<T> Bits<T> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Bits<U> {
+        Bits(f(self.0))
+    }
+}
+impl<T> Bytes<T> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Bytes<U> {
+        Bytes(f(self.0))
+    }
+}
+impl<T> Words32<T> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Words32<U> {
+        Words32(f(self.0))
+    }
+}
