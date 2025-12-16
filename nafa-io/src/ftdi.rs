@@ -12,15 +12,10 @@ use crate::{
 pub mod devices;
 
 pub struct Device {
-    pub dev: ::ftdi::Device,
-    pub cmd_buf: Vec<u8>,
-    pub cmd_read_len: usize,
+    dev: ::ftdi::Device,
+    cmd_buf: Vec<u8>,
+    cmd_read_len: usize,
 }
-
-// think this is safe? we're sending `&Device`, the only reason it's not
-// auto-derived is because `::ftdi::Device` is a `*mut ffi::ftdi_context`. That
-// struct doesn't appear to containy any thread-specific constructs.
-unsafe impl Send for Device {}
 
 impl Device {
     pub fn new(

@@ -127,7 +127,7 @@ fn setup_progress_bar() -> indicatif::ProgressBar {
 
 fn run(
     command: CliCommand,
-    cont: &mut Controller<Box<dyn BackendTrait + Send>>,
+    cont: &mut Controller<Box<dyn BackendTrait>>,
     pb: Option<&indicatif::ProgressBar>,
 ) -> Result<()> {
     match command {
@@ -177,8 +177,8 @@ fn get_controller(
     backend: Backend,
     devices: &HashMap<IdCode, DeviceInfo>,
     addr: UsbAddr,
-) -> Result<Controller<Box<dyn BackendTrait + Send>>> {
-    let backend: Box<dyn BackendTrait + Send> = match backend {
+) -> Result<Controller<Box<dyn BackendTrait>>> {
+    let backend: Box<dyn BackendTrait> = match backend {
         Backend::Ftdi => Box::new(get_device_ftdi(addr)?),
         Backend::Xpc => Box::new(get_device_xpc(addr)?),
     };

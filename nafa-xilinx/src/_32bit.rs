@@ -42,7 +42,7 @@ pub fn read_xadc<B: Backend>(
     cont.run(start.into_iter().chain(drp_commands).chain(after))
 }
 
-pub fn program<B: Backend + Send>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
+pub fn program<B: Backend>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
     cont.run([
         Command::ir(commands::JSHUTDOWN as _),
         Command::ir(commands::CFG_IN as _),
@@ -51,7 +51,7 @@ pub fn program<B: Backend + Send>(cont: &mut Controller<B>, data: &[u8]) -> Resu
     Ok(())
 }
 
-pub fn readback<B: Backend + Send>(cont: &mut Controller<B>, len: Bytes<usize>) -> Result<&[u8]> {
+pub fn readback<B: Backend>(cont: &mut Controller<B>, len: Bytes<usize>) -> Result<&[u8]> {
     use self::registers::{Addr, OpCode, type2};
     let readback = [
         Type1::SYNC,
