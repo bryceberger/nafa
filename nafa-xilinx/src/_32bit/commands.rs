@@ -35,4 +35,10 @@ mod internal {
     pub const USER4:           u8 = 0b100011; // Not available until after configuration
     pub const XADC_DRP:        u8 = 0b110111; // PRIVATE
     pub const INTEST_RSVD:     u8 = 0b000111; // PRIVATE
+
+    // Zynq commands (not shifted to deal with PS/PL situation)
+    pub const IP_DISABLE:      u8 = 0b011001; // PS TAP IP_DISABLE Status reg
+    pub const JTAG_STATUS:     u8 = 0b011111; // PS TAP JTAG_STATUS Register
+    pub const JTAG_CTRL:       u8 = 0b100000; // PS TAP Con/Disconnect PL and TAP
+    pub const ERROR_STATUS:    u8 = 0b111110; // PS TAP ERROR_STATUS Register
 }
