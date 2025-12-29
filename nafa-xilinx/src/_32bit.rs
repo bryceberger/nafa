@@ -43,7 +43,11 @@ pub fn read_xadc<B: Backend>(
 }
 
 pub fn program<B: Backend + Send>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
-    cont.run([Command::ir(commands::CFG_IN as _), Command::dr_tx_with_notification(data)])?;
+    cont.run([
+        Command::ir(commands::JSHUTDOWN as _),
+        Command::ir(commands::CFG_IN as _),
+        Command::dr_tx_with_notification(data),
+    ])?;
     Ok(())
 }
 
