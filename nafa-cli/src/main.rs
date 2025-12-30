@@ -196,8 +196,9 @@ fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
 }
 
 fn get_device_ftdi(addr: UsbAddr) -> Result<ftdi::Device> {
-    let dev = ::ftdi::find_by_vid_pid(addr.vid, addr.pid).open()?;
-    ftdi::Device::new(dev, &devices::NEXSYS4, Some(30_000_000))
+    let dev = rusb::open_device_with_vid_pid(addr.vid, addr.pid)
+        .ok_or_else(|| eyre!("could not open device {addr}"))?;
+    ftdi::Device::new(dev, &devices::NEXSYS4, 30_000_000)
 }
 
 fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {

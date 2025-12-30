@@ -11,7 +11,6 @@ authors = ["Bryce Berger"]
 [workspace.dependencies]
 color-eyre = "0.6"
 eyre = "0.6"
-ftdi = { version = "0.1.3", features = ["vendored"] }
 rusb = { version = "0.9.4", features = ["vendored"] }
 strum = "0.27.2"
 tracing = "0.1"

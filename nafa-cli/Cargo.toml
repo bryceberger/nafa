@@ -9,7 +9,6 @@ authors.workspace = true
 clap = { version = "4.5.50", features = ["derive"] }
 color-eyre.workspace = true
 eyre.workspace = true
-ftdi.workspace = true
 indicatif = "0.18.2"
 nafa-io.path = "../nafa-io"
 nafa-xilinx.path = "../nafa-xilinx"

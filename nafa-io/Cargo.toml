@@ -7,7 +7,6 @@ authors.workspace = true
 
 [dependencies]
 eyre.workspace = true
-ftdi.workspace = true
 rusb.workspace = true
 strum = { workspace = true, features = ["derive"] }
 tracing.workspace = true

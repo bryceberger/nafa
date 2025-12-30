@@ -11,25 +11,26 @@ use crate::{
 };
 
 pub mod devices;
+mod io;
 
 pub struct Device {
-    dev: ::ftdi::Device,
+    dev: io::Device,
     cmd_buf: Vec<u8>,
     cmd_read_len: usize,
 }
 
-fn send(dev: &mut ::ftdi::Device, data: &[u8]) -> Result<()> {
-    dev.usb_purge_tx_buffer()?;
+fn send(dev: &mut io::Device, data: &[u8]) -> Result<()> {
+    dev.flush_rx()?;
     dev.write_all(data)?;
     Ok(())
 }
 
-fn recv(dev: &mut ::ftdi::Device, data: &mut [u8]) -> Result<()> {
+fn recv(dev: &mut io::Device, data: &mut [u8]) -> Result<()> {
     dev.read_exact(data)?;
     Ok(())
 }
 
-fn xfer(dev: &mut ::ftdi::Device, txdata: &[u8], rxdata: &mut [u8]) -> Result<()> {
+fn xfer(dev: &mut io::Device, txdata: &[u8], rxdata: &mut [u8]) -> Result<()> {
     send(dev, txdata)?;
     recv(dev, rxdata)?;
     Ok(())
@@ -37,29 +38,13 @@ fn xfer(dev: &mut ::ftdi::Device, txdata: &[u8], rxdata: &mut [u8]) -> Result<()
 
 impl Device {
     pub fn new(
-        mut dev: ftdi::Device,
+        handle: rusb::DeviceHandle<rusb::GlobalContext>,
         info: &devices::Info,
-        clock_frequency: Option<u32>,
+        clock_frequency: u32,
     ) -> Result<Self> {
-        let in_transfer_size = 4096;
-        let latency_timer = 16;
-        let mask = 0x00;
+        let mut dev = io::Device::new(handle)?;
 
-        dev.usb_reset()?;
-        dev.usb_purge_buffers()?;
-        dev.set_write_chunksize(in_transfer_size);
-        dev.set_read_chunksize(in_transfer_size);
-        dev.set_latency_timer(latency_timer)?;
-        dev.usb_set_event_char(None)?;
-        dev.usb_set_error_char(None)?;
-        dev.set_flow_control(ftdi::FlowControl::RtsCts)?;
-        dev.set_bitmode(0, ftdi::BitMode::Reset)?;
-        dev.set_bitmode(mask, ftdi::BitMode::Mpsse)?;
-
-        if let Some(frequency) = clock_frequency {
-            dev.set_mpsse_clock(frequency)?;
-        }
-
+        let (clkdiv, divisor) = get_mpsse_clock(clock_frequency);
         let init_cmd = [
             MpsseCommand::SetDataBitsLowbyte as u8,
             info.dbus_data,
@@ -67,6 +52,10 @@ impl Device {
             MpsseCommand::SetDataBitsHighbyte as u8,
             info.cbus_data,
             info.cbus_en,
+            clkdiv,
+            MpsseCommand::SetClockFrequency as u8,
+            (divisor & 0xff) as u8,
+            ((divisor >> 8) & 0xff) as u8,
         ];
         send(&mut dev, &init_cmd)?;
 
@@ -75,6 +64,35 @@ impl Device {
             cmd_buf: Vec::new(),
             cmd_read_len: 0,
         })
+    }
+}
+
+fn get_mpsse_clock(freq: u32) -> (u8, u16) {
+    const MAX: u32 = 30_000_000;
+    const MIN: u32 = 92;
+
+    assert!(
+        freq >= MIN,
+        "frequency of {} exceeds minimum of {}",
+        freq,
+        MIN
+    );
+    assert!(
+        freq <= MAX,
+        "frequency of {} exceeds maximum of {}",
+        freq,
+        MAX
+    );
+
+    match freq {
+        ..=6_000_000 => (
+            MpsseCommand::EnableClockDivide as u8,
+            (6_000_000 / freq - 1) as _,
+        ),
+        _ => (
+            MpsseCommand::DisableClockDivide as u8,
+            (30_000_000 / freq - 1) as _,
+        ),
     }
 }
 
