@@ -385,7 +385,6 @@ version = "0.0.1"
 dependencies = [
  "eyre",
  "ftdi",
- "ftdi-mpsse",
  "rusb",
  "strum",
  "tracing",

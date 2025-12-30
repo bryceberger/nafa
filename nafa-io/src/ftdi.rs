@@ -1,5 +1,6 @@
+use std::io::{Read, Write};
+
 use eyre::Result;
-pub use ftdi_mpsse::MpsseCmdExecutor;
 use tracing::{debug, instrument};
 
 use crate::{
@@ -17,16 +18,48 @@ pub struct Device {
     cmd_read_len: usize,
 }
 
+fn send(dev: &mut ::ftdi::Device, data: &[u8]) -> Result<()> {
+    dev.usb_purge_tx_buffer()?;
+    dev.write_all(data)?;
+    Ok(())
+}
+
+fn recv(dev: &mut ::ftdi::Device, data: &mut [u8]) -> Result<()> {
+    dev.read_exact(data)?;
+    Ok(())
+}
+
+fn xfer(dev: &mut ::ftdi::Device, txdata: &[u8], rxdata: &mut [u8]) -> Result<()> {
+    send(dev, txdata)?;
+    recv(dev, rxdata)?;
+    Ok(())
+}
+
 impl Device {
     pub fn new(
         mut dev: ftdi::Device,
         info: &devices::Info,
         clock_frequency: Option<u32>,
     ) -> Result<Self> {
-        dev.init(&ftdi_mpsse::MpsseSettings {
-            clock_frequency,
-            ..Default::default()
-        })?;
+        let in_transfer_size = 4096;
+        let latency_timer = 16;
+        let mask = 0x00;
+
+        dev.usb_reset()?;
+        dev.usb_purge_buffers()?;
+        dev.set_write_chunksize(in_transfer_size);
+        dev.set_read_chunksize(in_transfer_size);
+        dev.set_latency_timer(latency_timer)?;
+        dev.usb_set_event_char(None)?;
+        dev.usb_set_error_char(None)?;
+        dev.set_flow_control(ftdi::FlowControl::RtsCts)?;
+        dev.set_bitmode(0, ftdi::BitMode::Reset)?;
+        dev.set_bitmode(mask, ftdi::BitMode::Mpsse)?;
+
+        if let Some(frequency) = clock_frequency {
+            dev.set_mpsse_clock(frequency)?;
+        }
+
         let init_cmd = [
             MpsseCommand::SetDataBitsLowbyte as u8,
             info.dbus_data,
@@ -35,7 +68,7 @@ impl Device {
             info.cbus_data,
             info.cbus_en,
         ];
-        dev.send(&init_cmd)?;
+        send(&mut dev, &init_cmd)?;
 
         Ok(Self {
             dev,
@@ -256,7 +289,7 @@ impl Backend for Device {
         );
 
         let buf = buf.extend(self.cmd_read_len);
-        self.dev.xfer(&self.cmd_buf, buf)?;
+        xfer(&mut self.dev, &self.cmd_buf, buf)?;
 
         self.cmd_buf.clear();
         self.cmd_read_len = 0;

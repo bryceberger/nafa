@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["nafa-cli","nafa-io", "nafa-xilinx"]
+members = ["nafa-cli", "nafa-io", "nafa-xilinx"]
 
 [workspace.package]
 version = "0.0.1"

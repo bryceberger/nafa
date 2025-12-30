@@ -7,7 +7,6 @@ authors.workspace = true
 
 [dependencies]
 eyre.workspace = true
-ftdi-mpsse = "0.1.2"
 ftdi.workspace = true
 rusb.workspace = true
 strum = { workspace = true, features = ["derive"] }
