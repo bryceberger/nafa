@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::Parser;
-use color_eyre::{Result, eyre::eyre};
+use color_eyre::Result;
 use nafa_io::{
     Backend as BackendTrait, Command, Controller, ShortHex,
     devices::{DeviceInfo, IdCode},
@@ -85,10 +85,10 @@ fn main() -> Result<()> {
 
     // no controller
     if let CliCommand::FlashXpc(flash) = command {
-        return flash_xpc(global.usb, flash);
+        return smol::block_on(flash_xpc(global.usb, flash));
     }
 
-    let mut cont = get_controller(global.backend, &get_devices(), global.usb)?;
+    let mut cont = smol::block_on(get_controller(global.backend, &get_devices(), global.usb))?;
     let progress = match command {
         CliCommand::Readback(_) | CliCommand::Program(_) => !global.no_progress_bar,
         _ => false,
@@ -136,10 +136,10 @@ fn run(
 
         // controller
         CliCommand::Info => {
-            info(cont)?;
+            smol::block_on(info(cont))?;
         }
         CliCommand::InfoXadc => {
-            info_xadc(cont)?;
+            smol::block_on(info_xadc(cont))?;
         }
         CliCommand::Readback(args) => {
             let data = match &cont.info().specific {
@@ -149,7 +149,7 @@ fn run(
                     if let Some(pb) = pb {
                         pb.set_length(Bytes::from(info.readback).0 as _)
                     }
-                    nafa_xilinx::_32bit::readback(cont, len)?
+                    smol::block_on(nafa_xilinx::_32bit::readback(cont, len))?
                 }
             };
             std::fs::write(args.output_file, data)?;
@@ -162,7 +162,7 @@ fn run(
             if let Some(pb) = pb {
                 pb.set_length(data.len() as _)
             }
-            nafa_xilinx::_32bit::program(cont, &data)?;
+            smol::block_on(nafa_xilinx::_32bit::program(cont, &data))?;
         }
     }
 
@@ -173,41 +173,48 @@ fn get_devices() -> HashMap<IdCode, DeviceInfo> {
     nafa_io::devices::builtin().collect()
 }
 
-fn get_controller(
+async fn get_controller(
     backend: Backend,
     devices: &HashMap<IdCode, DeviceInfo>,
     addr: UsbAddr,
 ) -> Result<Controller<Box<dyn BackendTrait>>> {
     let backend: Box<dyn BackendTrait> = match backend {
-        Backend::Ftdi => Box::new(get_device_ftdi(addr)?),
-        Backend::Xpc => Box::new(get_device_xpc(addr)?),
+        Backend::Ftdi => Box::new(get_device_ftdi(addr).await?),
+        Backend::Xpc => Box::new(get_device_xpc(addr).await?),
     };
-    Controller::new(backend, devices)
+    Controller::new(backend, devices).await
 }
 
-fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
-    let device = rusb::open_device_with_vid_pid(addr.vid, addr.pid)
-        .ok_or_else(|| eyre!("failed to open device {:04X}:{:04X}", addr.vid, addr.pid))?;
+async fn open_device(addr: UsbAddr) -> Result<nusb::Device> {
+    let Some(device) = nusb::list_devices()
+        .await?
+        .find(|d| d.vendor_id() == addr.vid && d.product_id() == addr.pid)
+    else {
+        return Err(eyre::eyre!("failed to open device {addr}"));
+    };
+    Ok(device.open().await?)
+}
+
+async fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
+    let device = open_device(addr).await?;
     let firmware = match args.firmware {
         Firmware::XP2 => xpc::firmware::XP2,
     };
-    xpc::flash(&device, firmware)?;
+    xpc::flash(&device, firmware).await?;
     Ok(())
 }
 
-fn get_device_ftdi(addr: UsbAddr) -> Result<ftdi::Device> {
-    let dev = rusb::open_device_with_vid_pid(addr.vid, addr.pid)
-        .ok_or_else(|| eyre!("could not open device {addr}"))?;
-    ftdi::Device::new(dev, &devices::NEXSYS4, 30_000_000)
+async fn get_device_ftdi(addr: UsbAddr) -> Result<ftdi::Device> {
+    let dev = open_device(addr).await?;
+    ftdi::Device::new(dev, &devices::NEXSYS4, 30_000_000).await
 }
 
-fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {
-    let dev = rusb::open_device_with_vid_pid(addr.vid, addr.pid)
-        .ok_or_else(|| eyre!("failed to open device {addr}"))?;
-    xpc::Device::new(dev)
+async fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {
+    let dev = open_device(addr).await?;
+    xpc::Device::new(dev).await
 }
 
-fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
+async fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
     use nafa_xilinx::_32bit::{
         commands::{FUSE_DNA, FUSE_KEY, IDCODE},
         registers::{Addr, OpCode, Type1},
@@ -218,7 +225,9 @@ fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
         ("fuse_dna", FUSE_DNA, Bytes(8)),
         ("fuse_key", FUSE_KEY, Bytes(32)),
     ] {
-        let data = cont.run([Command::ir(cmd.into()), Command::dr_rx(len)])?;
+        let data = cont
+            .run([Command::ir(cmd.into()), Command::dr_rx(len)])
+            .await?;
         println!("{:>12}: {}", name, ShortHex(data));
     }
     let x = |addr| Type1::new(OpCode::Read, addr, Words32(1));
@@ -232,14 +241,14 @@ fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
         ("ctl1", x(Addr::Ctl1)),
     ];
     for (name, reg) in regs {
-        let out = nafa_xilinx::_32bit::read_register(cont, reg)?;
+        let out = nafa_xilinx::_32bit::read_register(cont, reg).await?;
         let data = u32::from_le_bytes(out.try_into().unwrap());
         println!("{name:>12}: {:08X} ({:08X})", data, data.reverse_bits());
     }
     Ok(())
 }
 
-fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
+async fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
     use nafa_xilinx::_32bit::drp::{Addr, Cmd, Command};
 
     let family = match &cont.info.specific {
@@ -265,7 +274,7 @@ fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
         c(Addr::VRefN),
         c(Addr::VccBram),
     ];
-    let xadc_regs = nafa_xilinx::_32bit::read_xadc(cont, regs)?;
+    let xadc_regs = nafa_xilinx::_32bit::read_xadc(cont, regs).await?;
 
     let show = |name: &str, addr: Addr, val: u16, unit: &str| {
         use nafa_xilinx::_32bit::drp::Transfer;

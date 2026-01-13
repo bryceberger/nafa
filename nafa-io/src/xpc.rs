@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use eyre::Result;
-use rusb::{
-    DeviceHandle, GlobalContext,
-    constants::{LIBUSB_ENDPOINT_OUT, LIBUSB_REQUEST_TYPE_VENDOR},
-};
+use nusb::transfer::{self, ControlIn, ControlOut, ControlType, Recipient};
 use tracing::{debug, info, instrument};
 
 use crate::{Backend, Buffer, Hex, SpaceHex, backend::Data, jtag, units::Bits};
@@ -12,7 +9,7 @@ use crate::{Backend, Buffer, Hex, SpaceHex, backend::Data, jtag, units::Bits};
 pub mod firmware;
 
 pub struct Device {
-    handle: DeviceHandle<GlobalContext>,
+    handle: nusb::Device,
     /// Data to transfer. 4 bits over the wire for every 2 bytes in buffer, with
     /// the following format:
     ///
@@ -57,49 +54,61 @@ const XPC_PROG: u16 = 1 << 3;
 
 const S: Duration = Duration::from_secs(1);
 
-pub fn flash<Ctx: rusb::UsbContext>(
-    dev: &DeviceHandle<Ctx>,
-    firmware: &[(u16, &[u8])],
-) -> Result<()> {
+pub async fn flash(dev: &nusb::Device, firmware: &[(u16, &[u8])]) -> Result<()> {
     // A host loader program must write 0x01 to the CPUCS register
     // to put the CPU into RESET, load all or part of the EZUSB
     // RAM with firmware, then reload the CPUCS register
     // with ‘0’ to take the CPU out of RESET. The CPUCS register
     // (at 0xE600) is the only EZ-USB register that can be written
     // using the Firmware Download command.
-    dev.claim_interface(0)?;
-    let request_type = LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_OUT;
+    let iface = dev.claim_interface(0).await?;
     let request = XPCU_CTRL_LOAD_FIRM;
     let index = 0;
-    dev.write_control(request_type, request, EZUSB_CPUCS, index, &[CPU_RESET], S)?;
+    let packet = ControlOut {
+        control_type: ControlType::Vendor,
+        recipient: Recipient::Device,
+        request,
+        value: EZUSB_CPUCS,
+        index,
+        data: &[CPU_RESET],
+    };
+    iface.control_out(packet, S).await?;
 
     for (addr, data) in firmware {
         let mut addr = *addr;
         for chunk in data.chunks(64) {
-            dev.write_control(request_type, request, addr, index, chunk, S)?;
+            let data = ControlOut {
+                value: addr,
+                data: chunk,
+                ..packet
+            };
+            iface.control_out(data, S).await?;
             addr += u16::try_from(chunk.len()).unwrap();
         }
     }
 
-    dev.write_control(request_type, request, EZUSB_CPUCS, index, &[0], S)?;
-    dev.release_interface(0)?;
+    let data = ControlOut {
+        data: &[0],
+        ..packet
+    };
+    iface.control_out(data, S).await?;
 
     Ok(())
 }
 
 impl Device {
-    pub fn new(h: DeviceHandle<GlobalContext>) -> Result<Self> {
-        request_28(&h, 0x11)?;
-        write_gpio(&h, XPC_PROG)?;
+    pub async fn new(h: nusb::Device) -> Result<Self> {
+        request_28(&h, 0x11).await?;
+        write_gpio(&h, XPC_PROG).await?;
         info!(
-            firmware_version = %Hex(read_firmware_version(&h)?),
-            cpld_version = %Hex(read_cpld_version(&h)?),
+            firmware_version = %Hex(read_firmware_version(&h).await?),
+            cpld_version = %Hex(read_cpld_version(&h).await?),
         );
 
-        request_28(&h, 0x11)?;
-        output_enable(&h, true)?;
-        shift(&h, 0xa6, 2, &[0x00; 2], None)?;
-        request_28(&h, 0x12)?;
+        request_28(&h, 0x11).await?;
+        output_enable(&h, true).await?;
+        shift(&h, 0xa6, 2, &[0x00; 2], None).await?;
+        request_28(&h, 0x12).await?;
 
         Ok(Self {
             handle: h,
@@ -130,84 +139,136 @@ impl Device {
         self.num_bits = (self.num_bits + 1) & 3;
     }
 
-    fn maybe_flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
+    async fn maybe_flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
         const MAX_BUF_LEN: usize = 8192;
         if self.cmd_buf.len() >= MAX_BUF_LEN {
-            self.flush(buf)?;
+            self.flush(buf).await?;
         }
         Ok(())
     }
 }
 
-fn request_28(h: &DeviceHandle<GlobalContext>, value: u16) -> Result<()> {
-    let written = h.write_control(0x40, 0xb0, 0x0028, value, &[], S)?;
-    assert_eq!(written, 0);
+async fn request_28(h: &nusb::Device, index: u16) -> Result<()> {
+    let data = ControlOut {
+        control_type: ControlType::Vendor,
+        recipient: Recipient::Device,
+        request: 0xb0,
+        value: 0x0028,
+        index,
+        data: &[],
+    };
+    h.control_out(data, S).await?;
     Ok(())
 }
 
-fn write_gpio(h: &DeviceHandle<GlobalContext>, bits: u16) -> Result<()> {
-    let written = h.write_control(0x40, 0xb0, 0x0030, bits, &[], S)?;
-    assert_eq!(written, 0);
+async fn write_gpio(h: &nusb::Device, bits: u16) -> Result<()> {
+    let data = ControlOut {
+        control_type: ControlType::Vendor,
+        recipient: Recipient::Device,
+        request: 0xb0,
+        value: 0x0030,
+        index: bits,
+        data: &[],
+    };
+    h.control_out(data, S).await?;
     Ok(())
 }
 
-fn read_firmware_version(h: &DeviceHandle<GlobalContext>) -> Result<u16> {
-    let mut out = [0x00; size_of::<u16>()];
-    let buf = out.as_mut_slice();
-    let read = h.read_control(0xc0, 0xb0, 0x0050, 0x0000, buf, S)?;
-    assert_eq!(read, size_of::<u16>());
-    Ok(u16::from_le_bytes(out))
+async fn read_firmware_version(h: &nusb::Device) -> Result<u16> {
+    let data = ControlIn {
+        control_type: ControlType::Vendor,
+        recipient: Recipient::Device,
+        request: 0xb0,
+        value: 0x0050,
+        index: 0x0000,
+        length: std::mem::size_of::<u16>() as _,
+    };
+    let buf = h.control_in(data, S).await?;
+    Ok(u16::from_le_bytes(buf.try_into().unwrap()))
 }
 
-fn read_cpld_version(h: &DeviceHandle<GlobalContext>) -> Result<u16> {
-    let mut out = [0x00; size_of::<u16>()];
-    let buf = out.as_mut_slice();
-    let read = h.read_control(0xc0, 0xb0, 0x0050, 0x0001, buf, S)?;
-    assert_eq!(read, size_of::<u16>());
-    Ok(u16::from_le_bytes(out))
+async fn read_cpld_version(h: &nusb::Device) -> Result<u16> {
+    let data = ControlIn {
+        control_type: ControlType::Vendor,
+        recipient: Recipient::Device,
+        request: 0xb0,
+        value: 0x0050,
+        index: 0x0001,
+        length: std::mem::size_of::<u16>() as _,
+    };
+    let buf = h.control_in(data, S).await?;
+    Ok(u16::from_le_bytes(buf.try_into().unwrap()))
 }
 
-fn output_enable(h: &DeviceHandle<GlobalContext>, enable: bool) -> Result<()> {
-    let read = h.write_control(0x40, 0xb0, if enable { 0x18 } else { 0x10 }, 0, &[], S)?;
-    assert_eq!(read, 0);
+async fn output_enable(h: &nusb::Device, enable: bool) -> Result<()> {
+    let data = ControlOut {
+        control_type: ControlType::Vendor,
+        recipient: Recipient::Device,
+        request: 0xb0,
+        value: if enable { 0x18 } else { 0x10 },
+        index: 0,
+        data: &[],
+    };
+    h.control_out(data, S).await?;
     Ok(())
 }
 
-fn shift(
-    h: &DeviceHandle<GlobalContext>,
+async fn shift(
+    h: &nusb::Device,
     reqno: u16,
     bits: u16,
     in_buf: &[u8],
     out_buf: Option<&mut [u8]>,
 ) -> Result<()> {
-    let written = h.write_control(0x40, 0xb0, reqno, bits, &[], S)?;
-    assert_eq!(written, 0);
+    use futures_lite::{AsyncReadExt, AsyncWriteExt};
 
-    let written = h.write_bulk(0x02, in_buf, S)?;
-    assert_eq!(written, in_buf.len());
+    let data = ControlOut {
+        control_type: ControlType::Vendor,
+        recipient: Recipient::Device,
+        request: 0xb0,
+        value: reqno,
+        index: bits,
+        data: &[],
+    };
+    h.control_out(data, S).await?;
+
+    let iface = h.claim_interface(0).await?;
+
+    let mut writer = iface
+        .endpoint::<transfer::Bulk, transfer::Out>(0x02)?
+        .writer(128)
+        .with_num_transfers(8)
+        .with_write_timeout(S);
+    writer.write_all(in_buf).await?;
+    writer.flush().await?;
 
     if let Some(out) = out_buf {
-        let read = h.read_bulk(0x86, out, S)?;
-        assert_eq!(read, out.len());
+        iface
+            .endpoint::<transfer::Bulk, transfer::In>(0x86)?
+            .reader(128)
+            .with_num_transfers(8)
+            .with_read_timeout(S)
+            .read(out)
+            .await?;
     }
 
     Ok(())
 }
 
-#[allow(unused)]
+#[async_trait::async_trait]
 impl Backend for Device {
     #[instrument(skip_all)]
-    fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
+    async fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
         for tms in path {
             self.add_bit(tms, true, false);
         }
 
-        self.maybe_flush(buf)?;
+        self.maybe_flush(buf).await?;
         Ok(())
     }
 
     #[instrument(skip_all)]
-    fn bytes(
+    async fn bytes(
         &mut self,
         buf: &mut dyn Buffer,
         before: Option<jtag::Path>,
@@ -245,7 +306,7 @@ impl Backend for Device {
                         self.cmd_read_len += 1;
                     }
                     buf.notify_write(1);
-                    self.maybe_flush(buf)?;
+                    self.maybe_flush(buf).await?;
                 }
             }
             Data::Rx(len) | Data::ConstantTx(_, len) => {
@@ -271,7 +332,7 @@ impl Backend for Device {
                     if tdo {
                         self.cmd_read_len += 1;
                     }
-                    self.maybe_flush(buf)?;
+                    self.maybe_flush(buf).await?;
                 }
             }
         }
@@ -286,12 +347,12 @@ impl Backend for Device {
             }
         }
 
-        self.maybe_flush(buf)?;
+        self.maybe_flush(buf).await?;
         Ok(())
     }
 
     #[instrument(skip_all)]
-    fn bits(
+    async fn bits(
         &mut self,
         buf: &mut dyn Buffer,
         before: Option<jtag::Path>,
@@ -326,12 +387,12 @@ impl Backend for Device {
             }
         }
 
-        self.maybe_flush(buf)?;
+        self.maybe_flush(buf).await?;
         Ok(())
     }
 
     #[instrument(skip_all)]
-    fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
+    async fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
         if self.num_bits == 0 {
             self.add_bit_internal(false, false, false, false);
         }
@@ -345,7 +406,7 @@ impl Backend for Device {
         } else {
             usize::from(self.num_bits)
         };
-        let in_bits = ((self.cmd_buf.len() - 2) / 2 * 4 + extra_bits);
+        let in_bits = (self.cmd_buf.len() - 2) / 2 * 4 + extra_bits;
         let in_bits = in_bits.try_into().unwrap();
         debug!(
             in_bits,
@@ -353,7 +414,7 @@ impl Backend for Device {
             expect_read = self.cmd_read_len,
             data = %SpaceHex(&self.cmd_buf),
         );
-        shift(&self.handle, 0xa6, in_bits, &self.cmd_buf, buf)?;
+        shift(&self.handle, 0xa6, in_bits, &self.cmd_buf, buf).await?;
 
         self.cmd_buf.clear();
         self.cmd_read_len = 0;

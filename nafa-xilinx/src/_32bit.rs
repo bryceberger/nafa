@@ -10,7 +10,7 @@ pub mod registers;
 
 use self::registers::Type1;
 
-pub fn read_register<B: Backend>(cont: &mut Controller<B>, reg: Type1) -> Result<&[u8]> {
+pub async fn read_register<B: Backend>(cont: &mut Controller<B>, reg: Type1) -> Result<&[u8]> {
     let tiny_bitstream = bitstream_to_wire_order([Type1::SYNC, Type1::NOOP, reg.to_raw()]);
     let tiny_bitstream = tiny_bitstream.as_flattened();
 
@@ -20,9 +20,10 @@ pub fn read_register<B: Backend>(cont: &mut Controller<B>, reg: Type1) -> Result
         Command::ir(commands::CFG_OUT as _),
         Command::dr_rx(Bytes::from(reg.word_count.map(|x| x.into()))),
     ])
+    .await
 }
 
-pub fn read_xadc<B: Backend>(
+pub async fn read_xadc<B: Backend>(
     cont: &mut Controller<B>,
     regs: impl IntoIterator<Item = drp::Command>,
 ) -> Result<&[u8]> {
@@ -40,19 +41,21 @@ pub fn read_xadc<B: Backend>(
         .flat_map(|c| std::iter::once(Command::dr_txrx(c)).chain(between));
 
     cont.run(start.into_iter().chain(drp_commands).chain(after))
+        .await
 }
 
-pub fn program<B: Backend>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
+pub async fn program<B: Backend>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
     cont.run([
         Command::ir(commands::JSHUTDOWN as _),
         Command::ir(commands::CFG_IN as _),
         Command::dr_tx_with_notification(data),
         Command::ir(commands::JSTART as _),
-    ])?;
+    ])
+    .await?;
     Ok(())
 }
 
-pub fn readback<B: Backend>(cont: &mut Controller<B>, len: Bytes<usize>) -> Result<&[u8]> {
+pub async fn readback<B: Backend>(cont: &mut Controller<B>, len: Bytes<usize>) -> Result<&[u8]> {
     use self::registers::{Addr, OpCode, type2};
     let readback = [
         Type1::SYNC,
@@ -90,7 +93,7 @@ pub fn readback<B: Backend>(cont: &mut Controller<B>, len: Bytes<usize>) -> Resu
         Command::dr_rx_with_notification(len),
     ];
 
-    cont.run(commands)
+    cont.run(commands).await
 }
 
 fn bitstream_to_wire_order<const N: usize>(x: [u32; N]) -> [[u8; 4]; N] {

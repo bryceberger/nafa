@@ -1,5 +1,3 @@
-use std::io::{Read, Write};
-
 use eyre::Result;
 use tracing::{debug, instrument};
 
@@ -19,30 +17,20 @@ pub struct Device {
     cmd_read_len: usize,
 }
 
-fn send(dev: &mut io::Device, data: &[u8]) -> Result<()> {
-    dev.flush_rx()?;
-    dev.write_all(data)?;
-    Ok(())
-}
-
-fn recv(dev: &mut io::Device, data: &mut [u8]) -> Result<()> {
-    dev.read_exact(data)?;
-    Ok(())
-}
-
-fn xfer(dev: &mut io::Device, txdata: &[u8], rxdata: &mut [u8]) -> Result<()> {
-    send(dev, txdata)?;
-    recv(dev, rxdata)?;
+#[instrument(skip_all)]
+async fn xfer(dev: &mut io::Device, txdata: &[u8], rxdata: &mut [u8]) -> Result<()> {
+    dev.send(txdata).await?;
+    dev.recv(rxdata).await?;
     Ok(())
 }
 
 impl Device {
-    pub fn new(
-        handle: rusb::DeviceHandle<rusb::GlobalContext>,
+    pub async fn new(
+        handle: nusb::Device,
         info: &devices::Info,
         clock_frequency: u32,
     ) -> Result<Self> {
-        let mut dev = io::Device::new(handle)?;
+        let mut dev = io::Device::new(handle).await?;
 
         let (clkdiv, divisor) = get_mpsse_clock(clock_frequency);
         let init_cmd = [
@@ -57,7 +45,7 @@ impl Device {
             (divisor & 0xff) as u8,
             ((divisor >> 8) & 0xff) as u8,
         ];
-        send(&mut dev, &init_cmd)?;
+        dev.send(&init_cmd).await?;
 
         Ok(Self {
             dev,
@@ -132,15 +120,20 @@ enum MpsseCommand {
 
 const MAX_READ_WRITE_LEN: usize = u16::MAX as usize + 1;
 impl Device {
-    fn maybe_flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
+    async fn maybe_flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
         const MAX_CMD_LEN: usize = MAX_READ_WRITE_LEN;
         if self.cmd_buf.len() >= MAX_CMD_LEN || self.cmd_read_len >= MAX_READ_WRITE_LEN {
-            self.flush(buf)?;
+            self.flush(buf).await?;
         }
         Ok(())
     }
 
-    fn tms_internal(&mut self, buf: &mut dyn Buffer, path: jtag::Path, tdi: bool) -> Result<()> {
+    async fn tms_internal(
+        &mut self,
+        buf: &mut dyn Buffer,
+        path: jtag::Path,
+        tdi: bool,
+    ) -> Result<()> {
         debug!(%path, tdi);
 
         let tdi = if tdi { 0x80 } else { 0x00 };
@@ -150,7 +143,7 @@ impl Device {
         self.cmd_buf.push(path.len - 1);
         self.cmd_buf.push(tdi | path.as_clocked());
 
-        self.maybe_flush(buf)
+        self.maybe_flush(buf).await
     }
 }
 
@@ -162,14 +155,15 @@ static ZEROES: &[u8; MAX_READ_WRITE_LEN] = &[0x00; MAX_READ_WRITE_LEN];
 // The last bit of information on TDI corresponds with the state transition on
 // TMS. When sending a WRITE_TMS, the high bit corresponds to TDI. Therefore,
 // last bit 1 -> WRITE_TMS 0b1xxxxxxx, 0 -> WRITE_TMS 0b0xxxxxxx.
+#[async_trait::async_trait]
 impl Backend for Device {
     #[instrument(skip_all)]
-    fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
-        self.tms_internal(buf, path, true)
+    async fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
+        self.tms_internal(buf, path, true).await
     }
 
     #[instrument(skip_all)]
-    fn bytes(
+    async fn bytes(
         &mut self,
         buf: &mut dyn Buffer,
         before: Option<jtag::Path>,
@@ -177,7 +171,7 @@ impl Backend for Device {
         after: Option<jtag::Path>,
     ) -> Result<()> {
         if let Some(path) = before {
-            self.tms_internal(buf, path, true)?;
+            self.tms_internal(buf, path, true).await?;
         }
 
         let mut last_bit = true;
@@ -203,7 +197,7 @@ impl Backend for Device {
                     self.cmd_buf.push((len >> 8) as u8);
                     self.cmd_buf.extend_from_slice(chunk);
                     buf.notify_write(chunk.len());
-                    self.maybe_flush(buf)?;
+                    self.maybe_flush(buf).await?;
                 }
 
                 if let Some(last) = last {
@@ -229,7 +223,7 @@ impl Backend for Device {
                     self.cmd_buf.push((read_len >> 8) as u8);
 
                     len = len.saturating_sub(MAX_READ_WRITE_LEN);
-                    self.maybe_flush(buf)?;
+                    self.maybe_flush(buf).await?;
                 }
             }
             Data::ConstantTx(tdi, Bytes(mut len)) => {
@@ -248,21 +242,21 @@ impl Backend for Device {
                     self.cmd_buf.extend_from_slice(tdi);
 
                     len = len.saturating_sub(MAX_READ_WRITE_LEN);
-                    self.maybe_flush(buf)?;
+                    self.maybe_flush(buf).await?;
                 }
             }
         };
 
         if let Some(path) = after {
-            self.tms_internal(buf, path, last_bit)?;
+            self.tms_internal(buf, path, last_bit).await?;
         }
 
-        self.maybe_flush(buf)?;
+        self.maybe_flush(buf).await?;
         Ok(())
     }
 
     #[instrument(skip_all)]
-    fn bits(
+    async fn bits(
         &mut self,
         buf: &mut dyn Buffer,
         before: Option<jtag::Path>,
@@ -271,7 +265,7 @@ impl Backend for Device {
         after: Option<jtag::Path>,
     ) -> Result<()> {
         if let Some(path) = before {
-            self.tms_internal(buf, path, true)?;
+            self.tms_internal(buf, path, true).await?;
         }
 
         let mut len = match after {
@@ -290,15 +284,15 @@ impl Backend for Device {
         }
 
         if let Some(path) = after {
-            self.tms_internal(buf, path, data & 1 == 1)?;
+            self.tms_internal(buf, path, data & 1 == 1).await?;
         }
 
-        self.maybe_flush(buf)?;
+        self.maybe_flush(buf).await?;
         Ok(())
     }
 
     #[instrument(skip_all)]
-    fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
+    async fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
         self.cmd_buf.push(MpsseCommand::SendImmediate as u8);
         debug!(
             write_len = self.cmd_buf.len(),
@@ -307,7 +301,7 @@ impl Backend for Device {
         );
 
         let buf = buf.extend(self.cmd_read_len);
-        xfer(&mut self.dev, &self.cmd_buf, buf)?;
+        xfer(&mut self.dev, &self.cmd_buf, buf).await?;
 
         self.cmd_buf.clear();
         self.cmd_read_len = 0;

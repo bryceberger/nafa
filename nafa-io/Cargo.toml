@@ -6,7 +6,10 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+async-trait = "0.1.89"
 eyre.workspace = true
-rusb.workspace = true
+futures-io = "0.3"
+futures-lite = "2.6.1"
+nusb.workspace = true
 strum = { workspace = true, features = ["derive"] }
 tracing.workspace = true

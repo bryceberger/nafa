@@ -1,77 +1,32 @@
-use std::{
-    io::{self, Read, Write},
-    time::Duration,
-};
+use std::time::Duration;
 
-use rusb::{Direction, Recipient, RequestType, request_type};
-
-type Result<T> = rusb::Result<T>;
+use eyre::Result;
+use nusb::transfer::{self, ControlOut, ControlType, Recipient};
 
 pub struct Device {
-    handle: rusb::DeviceHandle<rusb::GlobalContext>,
-    interface: Interface,
+    iface: nusb::Interface,
+    endpoints: Endpoints,
     packet_size: usize,
 }
 
-const CHUNK_SIZE: usize = 4096;
-
-impl Write for Device {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let buf = &buf[..buf.len().min(CHUNK_SIZE)];
-        self.handle
-            .write_bulk(self.interface.endpoints().in_, buf, TIMEOUT)
-            .map_err(io::Error::other)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl Read for Device {
-    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        // the FTDI device returns packets. The first 2 bytes of every packet are
-        // status, and should be dropped.
-        let num_packets = buf.len().div_ceil(self.packet_size);
-
-        let mut read_buffer = [0; CHUNK_SIZE];
-        let max_read_len = read_buffer.len().min(buf.len() + num_packets * 2);
-        let read_buffer = &mut read_buffer[..max_read_len];
-
-        let bytes_read = self
-            .handle
-            .read_bulk(self.interface.endpoints().out, read_buffer, TIMEOUT)
-            .map_err(io::Error::other)?;
-
-        let mut actual_read = 0;
-        for packet in read_buffer[..bytes_read].chunks(self.packet_size) {
-            let data = &packet[2..];
-            let (first, rest) = buf.split_at_mut(data.len());
-            first.copy_from_slice(data);
-            actual_read += data.len();
-            buf = rest;
-        }
-        Ok(actual_read)
-    }
-}
+const CHUNK_SIZE: usize = 1024;
 
 #[repr(u8)]
 #[derive(Clone, Copy)]
-#[allow(unused)]
 enum Interface {
-    A = 1,
-    B = 2,
-    C = 3,
-    D = 4,
+    A = 0,
+    #[expect(unused)]
+    B = 1,
+    #[expect(unused)]
+    C = 2,
+    #[expect(unused)]
+    D = 3,
 }
 
 struct Endpoints {
     in_: u8,
     out: u8,
 }
-
-const FTDI_DEVICE_OUT_REQTYPE: u8 =
-    request_type(Direction::Out, RequestType::Vendor, Recipient::Device);
 
 mod requests {
     pub const RESET: u8 = 0;
@@ -84,20 +39,12 @@ mod requests {
 
 const TIMEOUT: Duration = Duration::from_millis(5000);
 
-fn determine_max_packet_size(
-    device: rusb::Device<rusb::GlobalContext>,
-    interface: Interface,
-) -> usize {
-    let iface_n = interface.interface().into();
-    if let Ok(desc) = device.device_descriptor()
-        && desc.num_configurations() > 0
-        && let Ok(config) = device.config_descriptor(0)
-        && let Some(iface) = config.interfaces().nth(iface_n)
-        && let Some(desc) = iface.descriptors().next()
-        && desc.num_endpoints() > 0
-        && let Some(ep) = desc.endpoint_descriptors().next()
+#[tracing::instrument(skip_all)]
+fn determine_max_packet_size(iface: &nusb::Interface) -> usize {
+    if let Some(desc) = iface.descriptor()
+        && let Some(ep) = desc.endpoints().next()
     {
-        ep.max_packet_size().into()
+        ep.max_packet_size()
     } else {
         // 2232H packet size
         512
@@ -105,91 +52,151 @@ fn determine_max_packet_size(
 }
 
 impl Device {
-    pub fn new(handle: rusb::DeviceHandle<rusb::GlobalContext>) -> eyre::Result<Self> {
-        let desc = handle.device().device_descriptor()?;
-        assert_eq!(
-            desc.device_version(),
-            rusb::Version(7, 0, 0),
-            "only ft2232h supported"
-        );
+    #[tracing::instrument(skip_all)]
+    pub async fn new(handle: nusb::Device) -> Result<Self> {
+        let desc = handle.device_descriptor();
+        assert_eq!(desc.device_version(), 0x0700, "only ft2232h supported");
 
         let interface = Interface::A;
-        let packet_size = determine_max_packet_size(handle.device(), interface);
-
         let _ = handle.detach_kernel_driver(interface.interface());
-        handle.claim_interface(interface.interface())?;
+        let iface = handle.claim_interface(interface.interface()).await?;
+        let packet_size = determine_max_packet_size(&iface);
 
         let slf = Self {
-            handle,
+            iface,
             packet_size,
-            interface,
+            endpoints: interface.endpoints(),
         };
-        slf.init()?;
+        slf.init().await?;
 
         Ok(slf)
     }
 
-    fn init(&self) -> Result<()> {
+    #[tracing::instrument(skip_all)]
+    async fn init(&self) -> Result<()> {
         const RESET_SIO: u16 = 0x00;
-        self.write_control(requests::RESET, RESET_SIO)?;
-        self.flush_rx()?;
-        self.flush_tx()?;
-        self.write_control(requests::SET_LATENCY_TIMER, 16)?;
+        self.write_control(requests::RESET, RESET_SIO).await?;
+        self.flush_rx().await?;
+        self.flush_tx().await?;
+        self.write_control(requests::SET_LATENCY_TIMER, 16).await?;
 
         // high byte is enable, low byte is char (if enabled)
-        self.write_control(requests::SET_EVENT_CHAR, 0x00_00)?;
-        self.write_control(requests::SET_ERROR_CHAR, 0x00_00)?;
+        self.write_control(requests::SET_EVENT_CHAR, 0x00_00)
+            .await?;
+        self.write_control(requests::SET_ERROR_CHAR, 0x00_00)
+            .await?;
 
         // flow control is weird for some reason...
         const RTS_CTS: u16 = 0x100;
-        let flow_index = RTS_CTS | self.interface.index();
-        self.handle.write_control(
-            FTDI_DEVICE_OUT_REQTYPE,
-            requests::SET_FLOW_CTRL,
-            0,
-            flow_index,
-            &[],
-            TIMEOUT,
-        )?;
+        let flow_index = RTS_CTS | (u16::from(self.iface.interface_number()) + 1);
+        let data = ControlOut {
+            control_type: ControlType::Vendor,
+            recipient: Recipient::Device,
+            request: requests::SET_FLOW_CTRL,
+            value: 0,
+            index: flow_index,
+            data: &[],
+        };
+        self.iface.control_out(data, TIMEOUT).await?;
 
         // high byte is mode, low byte is mask
-        self.write_control(requests::SET_BITMODE, 0x02_00)?;
+        self.write_control(requests::SET_BITMODE, 0x02_00).await?;
 
         Ok(())
     }
 
+    #[tracing::instrument(skip_all)]
+    pub async fn send(&mut self, data: &[u8]) -> Result<()> {
+        use futures_lite::AsyncWriteExt;
+        self.flush_rx().await?;
+        let mut writer = self
+            .iface
+            .endpoint::<transfer::Bulk, transfer::Out>(self.endpoints.in_)?
+            .writer(CHUNK_SIZE)
+            .with_write_timeout(TIMEOUT);
+        writer.write_all(data).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn recv(&mut self, mut buf: &mut [u8]) -> Result<usize> {
+        use futures_lite::AsyncReadExt;
+
+        let original_len = buf.len();
+
+        let mut reader = self
+            .iface
+            .endpoint::<transfer::Bulk, transfer::In>(self.endpoints.out)?
+            .reader(CHUNK_SIZE)
+            .with_read_timeout(TIMEOUT);
+
+        let mut read_buffer = [0; CHUNK_SIZE];
+
+        // the FTDI device returns packets. The first 2 bytes of every packet are
+        // status, and should be dropped.
+        let num_packets = buf.len().div_ceil(self.packet_size);
+        let max_read_len = read_buffer.len().min(buf.len() + num_packets * 2);
+        let read_buffer = &mut read_buffer[..max_read_len];
+
+        let mut actual_bytes_read = 0;
+        while !buf.is_empty() {
+            tracing::info!(len = %read_buffer.len(), buf = %crate::SpaceHex(buf), "reading");
+            let bytes_read = reader.read(read_buffer).await?;
+            tracing::info!(bytes_read, read = %crate::SpaceHex(&read_buffer[..bytes_read]));
+            if bytes_read <= 2 {
+                break;
+            }
+            for packet in read_buffer[..bytes_read].chunks(self.packet_size) {
+                let data = &packet[2..];
+                let (first, rest) = buf.split_at_mut(data.len());
+                first.copy_from_slice(data);
+                actual_bytes_read += data.len();
+                buf = rest;
+            }
+        }
+
+        if actual_bytes_read != original_len {
+            return Err(eyre::eyre!(
+                "failed to fill buffer: read {actual_bytes_read} bytes, expected {original_len}"
+            ));
+        }
+
+        Ok(actual_bytes_read)
+    }
+
     /// Flush the read buffer on the chip
-    pub fn flush_rx(&self) -> Result<()> {
+    #[tracing::instrument(skip_all)]
+    pub async fn flush_rx(&self) -> Result<()> {
         const TCI_FLUSH: u16 = 2;
-        self.write_control(requests::RESET, TCI_FLUSH)
+        self.write_control(requests::RESET, TCI_FLUSH).await
     }
 
     /// Flush the write buffer on the chip
-    pub fn flush_tx(&self) -> Result<()> {
+    #[tracing::instrument(skip_all)]
+    pub async fn flush_tx(&self) -> Result<()> {
         const TCO_FLUSH: u16 = 1;
-        self.write_control(requests::RESET, TCO_FLUSH)
+        self.write_control(requests::RESET, TCO_FLUSH).await
     }
 
-    fn write_control(&self, request: u8, value: u16) -> Result<()> {
-        self.handle.write_control(
-            FTDI_DEVICE_OUT_REQTYPE,
+    #[tracing::instrument(skip(self))]
+    async fn write_control(&self, request: u8, value: u16) -> Result<()> {
+        let data = ControlOut {
+            control_type: ControlType::Vendor,
+            recipient: Recipient::Device,
             request,
             value,
-            self.interface.index(),
-            &[],
-            TIMEOUT,
-        )?;
+            index: u16::from(self.iface.interface_number()) + 1,
+            data: &[],
+        };
+        self.iface.control_out(data, TIMEOUT).await?;
         Ok(())
     }
 }
 
 impl Interface {
     const fn interface(self) -> u8 {
-        self as u8 - 1
-    }
-
-    const fn index(self) -> u16 {
-        self as u8 as u16
+        self as u8
     }
 
     const fn endpoints(self) -> Endpoints {

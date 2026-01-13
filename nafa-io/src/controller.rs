@@ -22,14 +22,16 @@ pub struct Controller<B> {
 }
 
 impl<B: Backend> Controller<B> {
-    pub fn new(mut backend: B, devices: &HashMap<IdCode, DeviceInfo>) -> Result<Self> {
+    pub async fn new(mut backend: B, devices: &HashMap<IdCode, DeviceInfo>) -> Result<Self> {
         let mut buf = Vec::new();
-        backend.tms(&mut buf, jtag::Path::RESET)?;
-        backend.tms(&mut buf, jtag::Path::RESET)?;
+        backend.tms(&mut buf, jtag::Path::RESET).await?;
+        backend.tms(&mut buf, jtag::Path::RESET).await?;
         let before = Some(jtag::PATHS[State::TestLogicReset][State::ShiftDR]);
         let after = Some(jtag::PATHS[State::ShiftDR][State::RunTestIdle]);
-        backend.bytes(&mut buf, before, Data::Rx(Bytes(8)), after)?;
-        backend.flush(&mut buf)?;
+        backend
+            .bytes(&mut buf, before, Data::Rx(Bytes(8)), after)
+            .await?;
+        backend.flush(&mut buf).await?;
 
         let [id, extra] = buf.as_chunks().0 else {
             return Err(eyre!("backend failed to fill buffer"));
@@ -75,7 +77,10 @@ impl<B: Backend> Controller<B> {
     /// [`jtag::State::RunTestIdle`].
     ///
     /// When IO occurs, the number of bytes read is sent over `sender`.
-    pub fn run<'d>(&mut self, commands: impl IntoIterator<Item = Command<'d>>) -> Result<&[u8]> {
+    pub async fn run<'d>(
+        &mut self,
+        commands: impl IntoIterator<Item = Command<'d>>,
+    ) -> Result<&[u8]> {
         let Self {
             backend,
             buf,
@@ -99,12 +104,18 @@ impl<B: Backend> Controller<B> {
                 _ => buf,
             };
             match command.inner {
-                CommandInner::IrTxBits { tdi } => backend.bits(buf, ir0, tdi, info.irlen, ir1)?,
-                CommandInner::DrTx { tdi } => backend.bytes(buf, dr0, Data::Tx(tdi), dr1)?,
-                CommandInner::DrRx { len } => backend.bytes(buf, dr0, Data::Rx(len), dr1)?,
-                CommandInner::DrTxRx { tdi } => backend.bytes(buf, dr0, Data::TxRx(tdi), dr1)?,
+                CommandInner::IrTxBits { tdi } => {
+                    backend.bits(buf, ir0, tdi, info.irlen, ir1).await?
+                }
+                CommandInner::DrTx { tdi } => backend.bytes(buf, dr0, Data::Tx(tdi), dr1).await?,
+                CommandInner::DrRx { len } => backend.bytes(buf, dr0, Data::Rx(len), dr1).await?,
+                CommandInner::DrTxRx { tdi } => {
+                    backend.bytes(buf, dr0, Data::TxRx(tdi), dr1).await?
+                }
                 CommandInner::Idle { len } => {
-                    backend.bytes(buf, None, Data::ConstantTx(false, len), None)?
+                    backend
+                        .bytes(buf, None, Data::ConstantTx(false, len), None)
+                        .await?
                 }
             }
         }
@@ -114,8 +125,8 @@ impl<B: Backend> Controller<B> {
             _ => buf,
         };
 
-        backend.tms(buf, jtag::Path::IDLE)?;
-        backend.flush(buf)?;
+        backend.tms(buf, jtag::Path::IDLE).await?;
+        backend.flush(buf).await?;
         Ok(&self.buf)
     }
 }

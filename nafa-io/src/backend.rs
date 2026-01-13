@@ -16,10 +16,11 @@ pub enum Data<'d> {
 ///
 /// The implementation is allowed to flush at any time, though only required to
 /// flush on [`Backend::flush`].
-pub trait Backend {
-    fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()>;
+#[async_trait::async_trait]
+pub trait Backend: Send {
+    async fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()>;
 
-    fn bytes(
+    async fn bytes(
         &mut self,
         buf: &mut dyn Buffer,
         before: Option<jtag::Path>,
@@ -27,7 +28,7 @@ pub trait Backend {
         after: Option<jtag::Path>,
     ) -> Result<()>;
 
-    fn bits(
+    async fn bits(
         &mut self,
         buf: &mut dyn Buffer,
         before: Option<jtag::Path>,
@@ -37,10 +38,10 @@ pub trait Backend {
     ) -> Result<()>;
 
     /// Run any queud IO commands
-    fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()>;
+    async fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()>;
 }
 
-pub trait Buffer {
+pub trait Buffer: Send {
     /// Extend the buffer, returning a mutable slice to the newly-allocated
     /// memory
     fn extend(&mut self, size: usize) -> &mut [u8];
@@ -50,22 +51,23 @@ pub trait Buffer {
     fn notify_write(&mut self, size: usize) {}
 }
 
-impl<B: Backend + ?Sized> Backend for Box<B> {
-    fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
-        B::tms(self, buf, path)
+#[async_trait::async_trait]
+impl<B: Backend + ?Sized + Send> Backend for Box<B> {
+    async fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
+        B::tms(self, buf, path).await
     }
 
-    fn bytes(
+    async fn bytes(
         &mut self,
         buf: &mut dyn Buffer,
         before: Option<jtag::Path>,
         data: Data<'_>,
         after: Option<jtag::Path>,
     ) -> Result<()> {
-        B::bytes(self, buf, before, data, after)
+        B::bytes(self, buf, before, data, after).await
     }
 
-    fn bits(
+    async fn bits(
         &mut self,
         buf: &mut dyn Buffer,
         before: Option<jtag::Path>,
@@ -73,11 +75,11 @@ impl<B: Backend + ?Sized> Backend for Box<B> {
         len: Bits<u8>,
         after: Option<jtag::Path>,
     ) -> Result<()> {
-        B::bits(self, buf, before, data, len, after)
+        B::bits(self, buf, before, data, len, after).await
     }
 
-    fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
-        B::flush(&mut *self, buf)
+    async fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
+        B::flush(&mut *self, buf).await
     }
 }
 
