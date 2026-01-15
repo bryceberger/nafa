@@ -47,6 +47,7 @@ pub fn program<B: Backend>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> 
         Command::ir(commands::JSHUTDOWN as _),
         Command::ir(commands::CFG_IN as _),
         Command::dr_tx_with_notification(data),
+        Command::ir(commands::JSTART as _),
     ])?;
     Ok(())
 }
