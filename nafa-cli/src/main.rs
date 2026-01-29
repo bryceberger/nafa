@@ -9,7 +9,6 @@ use color_eyre::Result;
 use nafa_io::{
     Backend as BackendTrait, Command, Controller, ShortHex,
     devices::{DeviceInfo, IdCode},
-    ftdi::{self, devices},
     units::{Bytes, Words32},
     xpc,
 };
@@ -35,19 +34,9 @@ struct GlobalOpts {
     )]
     usb: UsbAddr,
 
-    #[arg(long, default_value = "ftdi", global = true)]
-    backend: Backend,
-
     /// Disable the progress bar
     #[arg(long, global = true)]
     no_progress_bar: bool,
-}
-
-#[derive(Clone, Copy, Default, clap::ValueEnum)]
-enum Backend {
-    #[default]
-    Ftdi,
-    Xpc,
 }
 
 #[derive(clap::Subcommand)]
@@ -88,7 +77,7 @@ fn main() -> Result<()> {
         return smol::block_on(flash_xpc(global.usb, flash));
     }
 
-    let mut cont = smol::block_on(get_controller(global.backend, &get_devices(), global.usb))?;
+    let mut cont = smol::block_on(get_controller(&get_devices(), global.usb))?;
     let progress = match command {
         CliCommand::Readback(_) | CliCommand::Program(_) => !global.no_progress_bar,
         _ => false,
@@ -174,44 +163,34 @@ fn get_devices() -> HashMap<IdCode, DeviceInfo> {
 }
 
 async fn get_controller(
-    backend: Backend,
     devices: &HashMap<IdCode, DeviceInfo>,
     addr: UsbAddr,
 ) -> Result<Controller<Box<dyn BackendTrait>>> {
-    let backend: Box<dyn BackendTrait> = match backend {
-        Backend::Ftdi => Box::new(get_device_ftdi(addr).await?),
-        Backend::Xpc => Box::new(get_device_xpc(addr).await?),
+    let device = get_device(addr).await?;
+    let backend = match nafa_io::cables::init(device).await {
+        Ok(b) => b,
+        Err(errs) => return Err(eyre::eyre!("{:?}", errs)),
     };
     Controller::new(backend, devices).await
 }
 
-async fn open_device(addr: UsbAddr) -> Result<nusb::Device> {
+async fn get_device(addr: UsbAddr) -> Result<nusb::DeviceInfo> {
     let Some(device) = nusb::list_devices()
         .await?
         .find(|d| d.vendor_id() == addr.vid && d.product_id() == addr.pid)
     else {
         return Err(eyre::eyre!("failed to open device {addr}"));
     };
-    Ok(device.open().await?)
+    Ok(device)
 }
 
 async fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
-    let device = open_device(addr).await?;
+    let device = get_device(addr).await?.open().await?;
     let firmware = match args.firmware {
         Firmware::XP2 => xpc::firmware::XP2,
     };
     xpc::flash(&device, firmware).await?;
     Ok(())
-}
-
-async fn get_device_ftdi(addr: UsbAddr) -> Result<ftdi::Device> {
-    let dev = open_device(addr).await?;
-    ftdi::Device::new(dev, &devices::NEXSYS4, 30_000_000).await
-}
-
-async fn get_device_xpc(addr: UsbAddr) -> Result<xpc::Device> {
-    let dev = open_device(addr).await?;
-    xpc::Device::new(dev).await
 }
 
 async fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {

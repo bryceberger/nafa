@@ -3,6 +3,8 @@ use std::time::Duration;
 use eyre::Result;
 use nusb::transfer::{self, ControlOut, ControlType, Recipient};
 
+use crate::ftdi::devices::Interface;
+
 pub struct Device {
     iface: nusb::Interface,
     endpoints: Endpoints,
@@ -10,18 +12,6 @@ pub struct Device {
 }
 
 const CHUNK_SIZE: usize = 1024;
-
-#[repr(u8)]
-#[derive(Clone, Copy)]
-enum Interface {
-    A = 0,
-    #[expect(unused)]
-    B = 1,
-    #[expect(unused)]
-    C = 2,
-    #[expect(unused)]
-    D = 3,
-}
 
 struct Endpoints {
     in_: u8,
@@ -53,11 +43,10 @@ fn determine_max_packet_size(iface: &nusb::Interface) -> usize {
 
 impl Device {
     #[tracing::instrument(skip_all)]
-    pub async fn new(handle: nusb::Device) -> Result<Self> {
+    pub async fn new(handle: nusb::Device, interface: Interface) -> Result<Self> {
         let desc = handle.device_descriptor();
         assert_eq!(desc.device_version(), 0x0700, "only ft2232h supported");
 
-        let interface = Interface::A;
         let _ = handle.detach_kernel_driver(interface.interface());
         let iface = handle.claim_interface(interface.interface()).await?;
         let packet_size = determine_max_packet_size(&iface);

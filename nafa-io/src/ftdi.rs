@@ -30,7 +30,7 @@ impl Device {
         info: &devices::Info,
         clock_frequency: u32,
     ) -> Result<Self> {
-        let mut dev = io::Device::new(handle).await?;
+        let mut dev = io::Device::new(handle, info.interface).await?;
 
         let (clkdiv, divisor) = get_mpsse_clock(clock_frequency);
         let init_cmd = [
@@ -47,11 +47,26 @@ impl Device {
         ];
         dev.send(&init_cmd).await?;
 
-        Ok(Self {
+        let mut me = Self {
             dev,
             cmd_buf: Vec::new(),
             cmd_read_len: 0,
-        })
+        };
+        let buf = &mut Vec::new();
+        me.tms(buf, jtag::Path::RESET).await?;
+        let before = Some(jtag::PATHS[jtag::State::TestLogicReset][jtag::State::ShiftDR]);
+        let after = Some(jtag::PATHS[jtag::State::ShiftDR][jtag::State::RunTestIdle]);
+        me.bytes(buf, before, Data::Rx(Bytes(4)), after).await?;
+        me.flush(buf).await?;
+
+        let ([idcode], []) = buf.as_chunks() else {
+            return Err(eyre::eyre!("failed to fill buffer"));
+        };
+        if u32::from_le_bytes(*idcode) == 0xffffffff {
+            return Err(eyre::eyre!("no devices on chain"));
+        }
+
+        Ok(me)
     }
 }
 
