@@ -13,9 +13,13 @@ pub async fn init(device: nusb::DeviceInfo) -> Result<BoxedBackend, Vec<eyre::Re
 
     for cable in KNOWN {
         if cable.vid == device.vendor_id() && cable.pid == device.product_id() {
+            tracing::info!(device = cable.name, "try init");
             let device = device.open().await.map_err(|x| vec![x.into()])?;
             match (cable.init)(device).await {
-                Ok(backend) => return Ok(backend),
+                Ok(backend) => {
+                    tracing::info!(device = cable.name, "init success");
+                    return Ok(backend);
+                }
                 Err(e) => errs.push(e.wrap_err(eyre::eyre!("while trying cable {}", cable.name))),
             }
         }

@@ -103,6 +103,7 @@ impl Device {
             .endpoint::<transfer::Bulk, transfer::Out>(self.endpoints.in_)?
             .writer(CHUNK_SIZE)
             .with_write_timeout(TIMEOUT);
+        tracing::info!(len = %data.len(), buf = %crate::SpaceHex(data), "writing");
         writer.write_all(data).await?;
         writer.flush().await?;
         Ok(())
