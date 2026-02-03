@@ -11,7 +11,8 @@ pub mod registers;
 use self::registers::Type1;
 
 pub async fn read_register<B: Backend>(cont: &mut Controller<B>, reg: Type1) -> Result<&[u8]> {
-    let tiny_bitstream = bitstream_to_wire_order([Type1::SYNC, Type1::NOOP, reg.to_raw()]);
+    let tiny_bitstream =
+        bitstream_to_wire_order([Type1::SYNC, Type1::NOOP, reg.to_raw(), Type1::NOOP, Type1::NOOP]);
     let tiny_bitstream = tiny_bitstream.as_flattened();
 
     cont.run([
