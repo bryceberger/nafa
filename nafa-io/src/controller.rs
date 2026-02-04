@@ -102,6 +102,7 @@ async fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) ->
     let sdr_to_idle = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
 
     let jtag_ctrl = 0b100000 << (4 + 6) | 0b100100 << 4 | 0b1111;
+    let enable_cmd = Data::Tx(&[0b0000_0011, 0x00, 0x00, 0x00]);
     let ones = Data::ConstantTx(true, Bytes(4));
     let rx_4 = Data::Rx(Bytes(4));
 
@@ -109,7 +110,9 @@ async fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) ->
     backend
         .bits(buf, reset_to_sir, jtag_ctrl, Bits(16), sir_to_idle)
         .await?;
-    backend.bytes(buf, idle_to_sdr, ones, sdr_to_reset).await?;
+    backend
+        .bytes(buf, idle_to_sdr, enable_cmd, sdr_to_reset)
+        .await?;
     backend.bytes(buf, reset_to_sdr, ones, sdr_to_reset).await?;
     backend.bytes(buf, reset_to_sdr, rx_4, sdr_to_idle).await?;
     backend.flush(buf).await?;
