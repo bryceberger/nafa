@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use eyre::Result;
 use nusb::transfer::{self, ControlIn, ControlOut, ControlType, Recipient};
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 use crate::{Backend, Buffer, Hex, SpaceHex, backend::Data, jtag, units::Bits};
 
@@ -248,7 +248,7 @@ async fn shift(
             .reader(128)
             .with_num_transfers(8)
             .with_read_timeout(S)
-            .read(out)
+            .read_exact(out)
             .await?;
     }
 
@@ -279,6 +279,11 @@ impl Backend for Device {
             for tms in path {
                 self.add_bit(tms, true, false);
             }
+        }
+
+        // without this, reads (sometimes???) drop the last few bits
+        while self.num_bits != 0 {
+            self.add_bit_internal(false, false, false, false);
         }
 
         let tms = false;
@@ -401,14 +406,9 @@ impl Backend for Device {
             0 => None,
             _ => Some(buf.extend(self.cmd_read_len)),
         };
-        let extra_bits = if self.num_bits == 0 {
-            4
-        } else {
-            usize::from(self.num_bits)
-        };
-        let in_bits = (self.cmd_buf.len() - 2) / 2 * 4 + extra_bits;
+        let in_bits = (self.cmd_buf.len() - 2) / 2 * 4 + usize::from(self.num_bits);
         let in_bits = in_bits.try_into().unwrap();
-        debug!(
+        info!(
             in_bits,
             in_len = self.cmd_buf.len(),
             expect_read = self.cmd_read_len,

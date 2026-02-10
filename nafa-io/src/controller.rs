@@ -66,7 +66,7 @@ pub async fn detect_chain<B: Backend>(
             }
 
             // special case for Zynq US+: add ARM_DAP to the chain
-            idcode if idcode & 0xfff == (0x093 << 1) && ret.is_empty() => {
+            idcode if ret.is_empty() && idcode & 0xfff == (0x093 << 1) => {
                 buf.clear();
                 let idcode = zynq_us_init_arm_dap(backend, buf).await?;
                 let info = get_info(idcode)?;
