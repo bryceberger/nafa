@@ -346,9 +346,21 @@ async fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
 }
 
 fn init_logging() -> Result<()> {
-    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+    use tracing::{Level, Metadata};
+    use tracing_subscriber::{EnvFilter, fmt, layer::Context, prelude::*};
+
+    // `nusb` emits `log::error!()` calls for various things. However, we handle /
+    // expect some errors. It's annoying to see 4 instances of "failed to claim
+    // interface" during normal device discovery.
+    struct NoNusbErrors;
+    impl<S> tracing_subscriber::layer::Filter<S> for NoNusbErrors {
+        fn enabled(&self, meta: &Metadata<'_>, _cx: &Context<'_, S>) -> bool {
+            !(meta.target() == "nusb::error" && *meta.level() == Level::ERROR)
+        }
+    }
+
     tracing_subscriber::registry()
-        .with(fmt::layer())
+        .with(fmt::layer().with_filter(NoNusbErrors))
         .with(EnvFilter::from_default_env())
         .with(tracing_error::ErrorLayer::default())
         .init();
