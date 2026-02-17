@@ -41,18 +41,33 @@ where
     }
 }
 
+// note: `.into()` can't use the trait because there's a
+// ```
+// impl From<T> for T { ... }
+// ```
+// in the standard library
+
 impl<T> Bits<T> {
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Bits<U> {
         Bits(f(self.0))
+    }
+    pub fn into_<U: From<T>>(self) -> Bits<U> {
+        Bits(self.0.into())
     }
 }
 impl<T> Bytes<T> {
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Bytes<U> {
         Bytes(f(self.0))
     }
+    pub fn into_<U: From<T>>(self) -> Bytes<U> {
+        Bytes(self.0.into())
+    }
 }
 impl<T> Words32<T> {
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Words32<U> {
         Words32(f(self.0))
+    }
+    pub fn into_<U: From<T>>(self) -> Words32<U> {
+        Words32(self.0.into())
     }
 }

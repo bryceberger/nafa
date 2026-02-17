@@ -13,13 +13,30 @@ use crate::{
     units::{Bits, Bytes},
 };
 
+// `*const T` isn't `Send`, mostly as a lint. However, we want `Controller` to
+// be `Send`.
+//
+// The only pointer that's used in it (`.notify`) has no complex lifetime
+// requirements. It's only exposed by `.with_notifications()`, which takes in a
+// reference and only uses the pointer while inside the function.
+#[repr(transparent)]
+struct Ptr<T>(*const T);
+unsafe impl<T> Send for Ptr<T> where for<'a> &'a T: Send {}
+unsafe impl<T> Sync for Ptr<T> where for<'a> &'a T: Sync {}
+impl<T> Clone for Ptr<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T> Copy for Ptr<T> {}
+
 pub struct Controller<B> {
     backend: B,
-    pub idcode: u32,
+    idcode: u32,
     before: Vec<DeviceInfo>,
-    pub info: DeviceInfo,
+    info: DeviceInfo,
     after: Vec<DeviceInfo>,
-    notify: Option<std::ptr::NonNull<AtomicUsize>>,
+    notify: Ptr<AtomicUsize>,
     buf: Vec<u8>,
 }
 
@@ -149,7 +166,7 @@ impl<B: Backend> Controller<B> {
             info,
             after,
             idcode,
-            notify: None,
+            notify: Ptr(std::ptr::null()),
         })
     }
 
@@ -157,12 +174,21 @@ impl<B: Backend> Controller<B> {
         &self.info
     }
 
+    pub fn idcode(&self) -> u32 {
+        self.idcode
+    }
+
     pub fn with_notifications<T>(
         &mut self,
         notify: &AtomicUsize,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let old_notify = self.notify.replace(std::ptr::NonNull::from_ref(notify));
+        // TODO: this _technically_ exposes some unsafety. If the user-provided closure
+        // panics, and the panic is later caught, we will be holding a
+        // potentially-dangling pointer.
+        //
+        // This _should_ use [PPYP](https://faultlore.com/blah/everyone-poops/).
+        let old_notify = std::mem::replace(&mut self.notify, Ptr(notify));
         let r = f(self);
         self.notify = old_notify;
         r
@@ -180,15 +206,19 @@ impl<B: Backend> Controller<B> {
         commands: impl IntoIterator<Item = Command<'d>>,
     ) -> Result<&[u8]> {
         let Self {
-            backend,
-            buf,
-            before,
-            info,
-            after,
+            ref mut backend,
+            ref mut buf,
+            ref before,
+            ref info,
+            ref after,
             notify,
             idcode: _,
-        } = self;
-        let notify = notify.map(|n| unsafe { n.as_ref() });
+        } = *self;
+        let notify = if notify.0.is_null() {
+            None
+        } else {
+            Some(unsafe { &*notify.0 })
+        };
         buf.clear();
 
         let irlen_before: Bits<u8> = Bits(before.iter().map(|i| i.irlen.0).sum());

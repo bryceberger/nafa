@@ -7,9 +7,9 @@ use std::{
 use clap::Parser;
 use color_eyre::Result;
 use nafa_io::{
-    Backend as BackendTrait, Command, Controller, ShortHex,
+    Backend, Controller,
     devices::{DeviceInfo, IdCode},
-    units::{Bytes, Words32},
+    units::Bytes,
     xpc,
 };
 
@@ -116,7 +116,7 @@ fn setup_progress_bar() -> indicatif::ProgressBar {
 
 fn run(
     command: CliCommand,
-    cont: &mut Controller<Box<dyn BackendTrait>>,
+    cont: &mut Controller<Box<dyn Backend>>,
     pb: Option<&indicatif::ProgressBar>,
 ) -> Result<()> {
     match command {
@@ -165,7 +165,7 @@ fn get_devices() -> HashMap<IdCode, DeviceInfo> {
 async fn get_controller(
     devices: &HashMap<IdCode, DeviceInfo>,
     addr: UsbAddr,
-) -> Result<Controller<Box<dyn BackendTrait>>> {
+) -> Result<Controller<Box<dyn Backend>>> {
     let device = get_device(addr).await?;
     let mut backend = match nafa_io::cables::init(device).await {
         Ok(b) => b,
@@ -226,67 +226,44 @@ async fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
     Ok(())
 }
 
-async fn info<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
-    use nafa_xilinx::_32bit::{
-        commands::{FUSE_DNA, FUSE_KEY, FUSE_USER, FUSE_USER_128, IDCODE, USERCODE},
-        registers::{Addr, OpCode, Type1},
-    };
+async fn info(cont: &mut Controller<impl Backend>) -> Result<()> {
+    use nafa_io::devices::{Specific as S, Xilinx32Family as F, Xilinx32Info as I};
+    use nafa_xilinx::{_32bit::info as info_32, read, zynq_32::info as info_zynq};
 
-    // TODO: zynq needs this to be replicated, or it spits out garbage
-    //
-    // specifically:
-    // strategy     idcode  efuse
-    // noop low       ✕       ✕
-    // noop high      ✕       ✓
-    // bypass low     ✓       ✕
-    // bypass high    ✕       ✓
-    // replicated     ✓       ✓
-    //
-    // I _assume_ this has something to do with 6 of the bits being for the
-    // processor and 6 for the FPGA. Need to check docs to figure out exact scheme
-    // for that, and if there's any info about this.
-    let x = |cmd: u8| u32::from(cmd) << 6 | u32::from(cmd);
-    for (name, cmd, len) in [
-        ("idcode", x(IDCODE), Bytes(4)),
-        ("usercode", x(USERCODE), Bytes(4)),
-        // TODO: length of fuse_dna is 64 bits on S7, 96 on US(+)
-        ("fuse_dna", x(FUSE_DNA), Bytes(12)),
-        ("fuse_key", x(FUSE_KEY), Bytes(32)),
-        ("fuse_user", x(FUSE_USER), Bytes(4)),
-        // TODO: this register is not available on S7
-        ("fuse_user_128", x(FUSE_USER_128), Bytes(16)),
-    ] {
-        let data = cont.run([Command::ir(cmd), Command::dr_rx(len)]).await?;
-        println!("{:>15}: {}", name, ShortHex(data));
-    }
+    let stdout = std::io::stdout().lock();
 
-    let x = |addr| Type1::new(OpCode::Read, addr, Words32(1));
-    let regs = [
-        ("boot_status", x(Addr::Bootsts)),
-        ("cfg_status", x(Addr::Stat)),
-        ("bspi", x(Addr::Bspi)),
-        ("cor0", x(Addr::Cor0)),
-        ("cor1", x(Addr::Cor1)),
-        ("ctl0", x(Addr::Ctl0)),
-        ("ctl1", x(Addr::Ctl1)),
-    ];
-    for (name, reg) in regs {
-        let out = nafa_xilinx::_32bit::read_register(cont, reg).await?;
-        println!("{name:>15}: {}", ShortHex(out));
+    match cont.info().specific {
+        S::Xilinx32(I { family: F::S7, .. }) => {
+            let info: info_32::S7 = read(cont).await?;
+            facet_json::to_writer_std(stdout, &info)?;
+        }
+        S::Xilinx32(I { family: F::US, .. }) => {
+            let info: info_32::US = read(cont).await?;
+            facet_json::to_writer_std(stdout, &info)?;
+        }
+        S::Xilinx32(I { family: F::UP, .. }) => {
+            let info: info_32::UP = read(cont).await?;
+            facet_json::to_writer_std(stdout, &info)?;
+        }
+        S::Xilinx32(I { family: F::ZP, .. }) => {
+            let info: info_zynq::ZP = read(cont).await?;
+            facet_json::to_writer_std(stdout, &info)?;
+        }
+        _ => return Err(eyre::eyre!("unsupported device")),
     }
     Ok(())
 }
 
-async fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
+async fn info_xadc<B: Backend>(cont: &mut Controller<B>) -> Result<()> {
     use nafa_xilinx::_32bit::drp::{Addr, Cmd, Command};
 
-    let family = match &cont.info.specific {
+    let family = match &cont.info().specific {
         nafa_io::devices::Specific::Unknown => todo!(),
         nafa_io::devices::Specific::Xilinx32(info) => info.family,
     };
 
-    println!("idcode: {:04X}", cont.idcode);
-    println!("  name: {}", cont.info.name);
+    println!("idcode: {:04X}", cont.idcode());
+    println!("  name: {}", cont.info().name);
 
     let c = |addr| Command {
         cmd: Cmd::Read,
@@ -303,7 +280,7 @@ async fn info_xadc<B: BackendTrait>(cont: &mut Controller<B>) -> Result<()> {
         c(Addr::VRefN),
         c(Addr::VccBram),
     ];
-    let xadc_regs = nafa_xilinx::_32bit::read_xadc(cont, regs).await?;
+    let xadc_regs = nafa_xilinx::_32bit::read_xadc(cont, 0, regs).await?;
 
     let show = |name: &str, addr: Addr, val: u16, unit: &str| {
         use nafa_xilinx::_32bit::drp::Transfer;

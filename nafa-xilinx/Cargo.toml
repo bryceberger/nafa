@@ -5,6 +5,13 @@ license.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "generate_python"
+
 [dependencies]
 eyre.workspace = true
+facet.workspace = true
+facet-python.workspace = true
 nafa-io.path = "../nafa-io"
+nestify = "0.3.3"
+tracing.workspace = true

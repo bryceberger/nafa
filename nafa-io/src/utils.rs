@@ -12,7 +12,7 @@ impl Display for Hex<u16> {
     }
 }
 
-const MAX_DISPLAY: usize = 16;
+const MAX_DISPLAY: usize = 64;
 
 pub struct ShortHex<'a>(pub &'a [u8]);
 impl Display for ShortHex<'_> {

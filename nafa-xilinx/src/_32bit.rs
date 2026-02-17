@@ -4,28 +4,94 @@ use nafa_io::{
     units::{Bytes, Words32},
 };
 
+use self::registers::{Addr, Type1};
+
 pub mod commands;
 pub mod drp;
+pub mod info;
 pub mod registers;
 
-use self::registers::Type1;
+fn shift_for_slr(active_slr: u8, inst: u8) -> u32 {
+    assert!(active_slr <= 4);
+    const NOOPS: u32 = 0b_100100_100100_100100_100100_100100;
+    // const NOOPS: u32 = u32::MAX;
+    let inst = u32::from(inst & 0b111111);
+    NOOPS & !(0b111111 << (active_slr * 6)) | inst << (active_slr * 6)
+}
 
-pub async fn read_register<B: Backend>(cont: &mut Controller<B>, reg: Type1) -> Result<&[u8]> {
+pub async fn read_device_register(
+    cont: &mut Controller<impl Backend>,
+    active_slr: u8,
+    reg: Type1,
+) -> Result<&[u8]> {
     let tiny_bitstream =
         bitstream_to_wire_order([Type1::SYNC, Type1::NOOP, reg.to_raw(), Type1::NOOP, Type1::NOOP]);
     let tiny_bitstream = tiny_bitstream.as_flattened();
 
     cont.run([
-        Command::ir(commands::CFG_IN as _),
+        Command::ir(shift_for_slr(active_slr, commands::CFG_IN)),
         Command::dr_tx(tiny_bitstream),
-        Command::ir(commands::CFG_OUT as _),
-        Command::dr_rx(Bytes::from(reg.word_count.map(|x| x.into()))),
+        Command::ir(shift_for_slr(active_slr, commands::CFG_OUT)),
+        Command::dr_rx(Bytes::from(reg.word_count.into_())),
     ])
     .await
 }
 
+async fn read_device_register_word(
+    cont: &mut Controller<impl Backend>,
+    active_slr: u8,
+    addr: Addr,
+) -> Result<u32> {
+    let data = read_device_register_sized(cont, active_slr, addr).await?;
+    let data = data.map(|x| x.reverse_bits());
+    Ok(u32::from_be_bytes(data))
+}
+
+async fn read_device_register_sized<const N: usize>(
+    cont: &mut Controller<impl Backend>,
+    active_slr: u8,
+    addr: Addr,
+) -> Result<&[u8; N]> {
+    const { assert!(N.is_multiple_of(4)) };
+    let n = u16::try_from(N / 4).unwrap();
+    read_device_register(
+        cont,
+        active_slr,
+        Type1::new(registers::OpCode::Read, addr, Words32(n)),
+    )
+    .await
+    .map(|x| {
+        x.try_into()
+            .expect("dr_rx() should always return exact len")
+    })
+}
+
+async fn read_jtag_register<B: Backend>(
+    cont: &mut Controller<B>,
+    active_slr: u8,
+    inst: u8,
+    len: Bytes<usize>,
+) -> Result<&[u8]> {
+    cont.run([Command::ir(shift_for_slr(active_slr, inst)), Command::dr_rx(len)])
+        .await
+}
+
+async fn read_jtag_register_sized<const N: usize, B: Backend>(
+    cont: &mut Controller<B>,
+    active_slr: u8,
+    inst: u8,
+) -> Result<&[u8; N]> {
+    read_jtag_register(cont, active_slr, inst, Bytes(N))
+        .await
+        .map(|x| {
+            x.try_into()
+                .expect("dr_rx() should always return exact len")
+        })
+}
+
 pub async fn read_xadc<B: Backend>(
     cont: &mut Controller<B>,
+    active_slr: u8,
     regs: impl IntoIterator<Item = drp::Command>,
 ) -> Result<&[u8]> {
     let drp_commands: Vec<[u8; 4]> = regs
@@ -33,7 +99,7 @@ pub async fn read_xadc<B: Backend>(
         .map(|c| c.to_bits().to_le_bytes())
         .collect();
 
-    let start = [Command::ir(commands::XADC_DRP as _)];
+    let start = [Command::ir(shift_for_slr(active_slr, commands::XADC_DRP))];
     let between = [Command::idle(Bytes(10))];
     let after = [Command::dr_rx(Bytes(4))];
 
@@ -97,6 +163,6 @@ pub async fn readback<B: Backend>(cont: &mut Controller<B>, len: Bytes<usize>) -
     cont.run(commands).await
 }
 
-fn bitstream_to_wire_order<const N: usize>(x: [u32; N]) -> [[u8; 4]; N] {
+pub(crate) fn bitstream_to_wire_order<const N: usize>(x: [u32; N]) -> [[u8; 4]; N] {
     x.map(|x| x.to_be_bytes().map(u8::reverse_bits))
 }
