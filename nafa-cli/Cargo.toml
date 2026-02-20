@@ -12,7 +12,6 @@ eyre.workspace = true
 facet.workspace = true
 facet-json.workspace = true
 indicatif = "0.18.2"
-inquire = "0.9.1"
 nafa-io.path = "../nafa-io"
 nafa-xilinx.path = "../nafa-xilinx"
 nusb.workspace = true

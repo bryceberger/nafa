@@ -34,6 +34,10 @@ struct GlobalOpts {
     )]
     usb: UsbAddr,
 
+    /// Device to open if there are multiple devices on the JTAG chain.
+    #[arg(long, global = true)]
+    jtag_idx: Option<usize>,
+
     /// Disable the progress bar
     #[arg(long, global = true)]
     no_progress_bar: bool,
@@ -77,7 +81,7 @@ fn main() -> Result<()> {
         return smol::block_on(flash_xpc(global.usb, flash));
     }
 
-    let mut cont = smol::block_on(get_controller(&get_devices(), global.usb))?;
+    let mut cont = smol::block_on(get_controller(&get_devices(), global.usb, global.jtag_idx))?;
     let progress = match command {
         CliCommand::Readback(_) | CliCommand::Program(_) => !global.no_progress_bar,
         _ => false,
@@ -165,37 +169,43 @@ fn get_devices() -> HashMap<IdCode, DeviceInfo> {
 async fn get_controller(
     devices: &HashMap<IdCode, DeviceInfo>,
     addr: UsbAddr,
+    jtag_idx: Option<usize>,
 ) -> Result<Controller<Box<dyn Backend>>> {
+    fn chain_info(devices: &[(u32, DeviceInfo)]) -> String {
+        let devices = devices.iter().enumerate();
+        devices.fold(String::new(), |mut acc, (idx, (idcode, info))| {
+            use std::fmt::Write;
+            write!(&mut acc, "\n    {idx:>2}: {idcode:08X} {}", info.name)
+                .expect("write to string cannot fail");
+            acc
+        })
+    }
+
     let device = get_device(addr).await?;
     let mut backend = match nafa_io::cables::init(device).await {
         Ok(b) => b,
         Err(errs) => return Err(eyre::eyre!("{:?}", errs)),
     };
     let devices = nafa_io::detect_chain(&mut backend, devices).await?;
-    let (before, device, after) = match &devices[..] {
-        [] => return Err(eyre::eyre!("no devices detected on jtag chain")),
-        [single] => (vec![], single.clone(), vec![]),
-        multiple => {
-            struct DisplayableInfo {
-                idx: usize,
-                idcode: u32,
-                name: &'static str,
-            }
-            impl std::fmt::Display for DisplayableInfo {
-                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    write!(f, "{:08X} {}", self.idcode, self.name)
-                }
-            }
-            let options = multiple.iter().enumerate();
-            let options = options.map(|(idx, (idcode, info))| DisplayableInfo {
-                idx,
-                idcode: *idcode,
-                name: info.name,
-            });
-            // TODO: options for selecting this other than inquire (like a flag)
-            let DisplayableInfo { idx, .. } =
-                inquire::Select::new("choose device", options.collect()).prompt()?;
+    let (before, device, after) = match (&devices[..], jtag_idx) {
+        ([], _) => return Err(eyre::eyre!("no devices detected on jtag chain")),
 
+        ([single], Some(0) | None) => (vec![], single.clone(), vec![]),
+
+        (multiple, Some(idx)) if idx >= multiple.len() => {
+            return Err(eyre::eyre!(
+                "idx {idx} too large for chain:{}",
+                chain_info(multiple)
+            ));
+        }
+        (multiple, None) => {
+            return Err(eyre::eyre!(
+                "multiple devices on jtag chain, but no index provided:{}",
+                chain_info(multiple)
+            ));
+        }
+
+        (multiple, Some(idx)) => {
             let collect =
                 |items: &[(u32, DeviceInfo)]| items.iter().map(|(_, info)| info.clone()).collect();
             let before = collect(&multiple[..idx]);
