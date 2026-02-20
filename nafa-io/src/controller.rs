@@ -178,10 +178,10 @@ impl<B: Backend> Controller<B> {
         self.idcode
     }
 
-    pub fn with_notifications<T>(
+    pub async fn with_notifications<T>(
         &mut self,
         notify: &AtomicUsize,
-        f: impl FnOnce(&mut Self) -> T,
+        f: impl AsyncFnOnce(&mut Self) -> T,
     ) -> T {
         // TODO: this _technically_ exposes some unsafety. If the user-provided closure
         // panics, and the panic is later caught, we will be holding a
@@ -189,7 +189,7 @@ impl<B: Backend> Controller<B> {
         //
         // This _should_ use [PPYP](https://faultlore.com/blah/everyone-poops/).
         let old_notify = std::mem::replace(&mut self.notify, Ptr(notify));
-        let r = f(self);
+        let r = f(self).await;
         self.notify = old_notify;
         r
     }

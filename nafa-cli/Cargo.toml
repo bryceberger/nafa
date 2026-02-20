@@ -9,13 +9,13 @@ authors.workspace = true
 clap = { version = "4.5.50", features = ["derive"] }
 color-eyre.workspace = true
 eyre.workspace = true
-facet.workspace = true
 facet-json.workspace = true
+facet.workspace = true
 indicatif = "0.18.2"
 nafa-io.path = "../nafa-io"
 nafa-xilinx.path = "../nafa-xilinx"
 nusb.workspace = true
-smol = "2"
+smol.workspace = true
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing.workspace = true

@@ -16,5 +16,6 @@ facet-json = "0.43.2"
 facet-pretty = "0.43.2"
 facet-python = "0.43.2"
 nusb = { version = "0.2.1", features = ["smol"] }
+smol = "2"
 strum = "0.27.2"
 tracing = "0.1"

@@ -12,6 +12,7 @@ use nafa_io::{
     units::Bytes,
     xpc,
 };
+use smol::future::FutureExt;
 
 use crate::cli_helpers::UsbAddr;
 
@@ -74,14 +75,17 @@ struct Program {
 
 fn main() -> Result<()> {
     init_logging()?;
-    let Args { global, command } = Args::parse();
+    let args = Args::parse();
+    smol::block_on(async_main(args))
+}
 
+async fn async_main(Args { global, command }: Args) -> Result<()> {
     // no controller
     if let CliCommand::FlashXpc(flash) = command {
-        return smol::block_on(flash_xpc(global.usb, flash));
+        return flash_xpc(global.usb, flash).await;
     }
 
-    let mut cont = smol::block_on(get_controller(&get_devices(), global.usb, global.jtag_idx))?;
+    let mut cont = get_controller(&get_devices(), global.usb, global.jtag_idx).await?;
     let progress = match command {
         CliCommand::Readback(_) | CliCommand::Program(_) => !global.no_progress_bar,
         _ => false,
@@ -90,19 +94,22 @@ fn main() -> Result<()> {
         let notify = &AtomicUsize::new(0);
         let done = &AtomicBool::new(false);
         let pb = &setup_progress_bar();
-        std::thread::scope(|s| {
-            s.spawn(move || {
-                while !done.load(Ordering::Acquire) {
-                    pb.set_position(notify.load(Ordering::Acquire) as _);
-                }
-            });
 
-            let r = cont.with_notifications(notify, |cont| run(command, cont, Some(pb)));
+        let progress = async {
+            while !done.load(Ordering::Acquire) {
+                pb.set_position(notify.load(Ordering::Acquire) as _);
+                smol::future::yield_now().await;
+            }
+            Ok(())
+        };
+        let runner = cont.with_notifications(notify, async |cont| {
+            let r = run(command, cont, Some(pb)).await;
             done.store(true, Ordering::Release);
             r
-        })?;
+        });
+        runner.race(progress).await?;
     } else {
-        run(command, &mut cont, None)?;
+        run(command, &mut cont, None).await?;
     }
     Ok(())
 }
@@ -118,7 +125,7 @@ fn setup_progress_bar() -> indicatif::ProgressBar {
     pb
 }
 
-fn run(
+async fn run(
     command: CliCommand,
     cont: &mut Controller<Box<dyn Backend>>,
     pb: Option<&indicatif::ProgressBar>,
@@ -129,10 +136,10 @@ fn run(
 
         // controller
         CliCommand::Info => {
-            smol::block_on(info(cont))?;
+            info(cont).await?;
         }
         CliCommand::InfoXadc => {
-            smol::block_on(info_xadc(cont))?;
+            info_xadc(cont).await?;
         }
         CliCommand::Readback(args) => {
             let data = match &cont.info().specific {
@@ -142,7 +149,7 @@ fn run(
                     if let Some(pb) = pb {
                         pb.set_length(Bytes::from(info.readback).0 as _)
                     }
-                    smol::block_on(nafa_xilinx::_32bit::readback(cont, len))?
+                    nafa_xilinx::_32bit::readback(cont, len).await?
                 }
             };
             std::fs::write(args.output_file, data)?;
@@ -155,7 +162,7 @@ fn run(
             if let Some(pb) = pb {
                 pb.set_length(data.len() as _)
             }
-            smol::block_on(nafa_xilinx::_32bit::program(cont, &data))?;
+            nafa_xilinx::_32bit::program(cont, &data).await?;
         }
     }
 
@@ -186,6 +193,7 @@ async fn get_controller(
         Ok(b) => b,
         Err(errs) => return Err(eyre::eyre!("{:?}", errs)),
     };
+
     let devices = nafa_io::detect_chain(&mut backend, devices).await?;
     let (before, device, after) = match (&devices[..], jtag_idx) {
         ([], _) => return Err(eyre::eyre!("no devices detected on jtag chain")),
