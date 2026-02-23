@@ -9,6 +9,7 @@ authors.workspace = true
 async-trait = "0.1.89"
 color-eyre.workspace = true
 eyre.workspace = true
+facet.workspace = true
 futures-io = "0.3"
 futures-lite = "2.6.1"
 nusb.workspace = true

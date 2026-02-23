@@ -1,13 +1,44 @@
 use eyre::Result;
+use facet::Facet;
 use nafa_io::{Backend, Controller};
+
+use crate::{
+    _32bit::info::{S7, UP, US},
+    zynq_32::info::ZP,
+};
 
 pub mod _32bit;
 pub mod zynq_32;
 
-pub trait Read: Sized {
+trait Read: Sized {
     fn read(cont: &mut Controller<impl Backend>) -> impl Future<Output = Result<Self>>;
 }
 
-pub async fn read<R: Read>(cont: &mut Controller<impl Backend>) -> Result<R> {
-    R::read(cont).await
+pub async fn read(cont: &mut Controller<impl Backend>) -> Result<XilinxInfo> {
+    use nafa_io::devices::{Specific as S, Xilinx32Family as F, Xilinx32Info as I};
+    match cont.info().specific {
+        S::Xilinx32(I { family: F::S7, .. }) => {
+            Ok(XilinxInfo::S7(_32bit::info::S7::read(cont).await?))
+        }
+        S::Xilinx32(I { family: F::US, .. }) => {
+            Ok(XilinxInfo::US(_32bit::info::US::read(cont).await?))
+        }
+        S::Xilinx32(I { family: F::UP, .. }) => {
+            Ok(XilinxInfo::UP(_32bit::info::UP::read(cont).await?))
+        }
+        S::Xilinx32(I { family: F::ZP, .. }) => {
+            Ok(XilinxInfo::ZP(zynq_32::info::ZP::read(cont).await?))
+        }
+        _ => Err(eyre::eyre!("unsupported device")),
+    }
+}
+
+#[repr(C)]
+#[derive(Facet)]
+#[facet(tag = "family", content = "data")]
+pub enum XilinxInfo {
+    S7(S7),
+    US(US),
+    UP(UP),
+    ZP(ZP),
 }

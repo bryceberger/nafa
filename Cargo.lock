@@ -839,6 +839,7 @@ dependencies = [
  "async-trait",
  "color-eyre",
  "eyre",
+ "facet",
  "futures-io",
  "futures-lite",
  "nusb",

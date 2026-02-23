@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Required, TypedDict
+from typing import Literal, Required, TypedDict
 
 class Registers(TypedDict, total=False):
     slrs: Required[list[RegistersPerSlr]]
@@ -75,14 +75,16 @@ class USJtagPerSlr(TypedDict, total=False):
     user3: Required[list[int]]
     user4: Required[list[int]]
 
+type Xilinx32Family = Literal["S7"] | Literal["US"] | Literal["UP"] | Literal["Z7"] | Literal["ZP"] | Literal["Versal"]
+
 class ZP(TypedDict, total=False):
     jtag: Required[UPJtag]
     registers: Required[Registers]
 
-class _Ignore(TypedDict, total=False):
-    s7: Required[S7]
-    up: Required[UP]
-    us: Required[US]
-    zp: Required[ZP]
 
+class XilinxInfo(TypedDict, total=False):
+    family: Required[Xilinx32Family]
+    data: Required[XilinxInfoData]
+
+type XilinxInfoData = S7 | US | UP | ZP
 

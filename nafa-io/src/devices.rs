@@ -1,3 +1,5 @@
+use facet::Facet;
+
 use crate::{
     jtag::IdCode,
     units::{Bits, Words32},
@@ -24,7 +26,8 @@ pub struct Xilinx32Info {
     pub readback: Words32<usize>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Facet)]
 pub enum Xilinx32Family {
     /// 7-series
     S7,
