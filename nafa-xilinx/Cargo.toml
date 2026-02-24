@@ -9,6 +9,7 @@ authors.workspace = true
 name = "generate_python"
 
 [dependencies]
+bitflags = "2.11.0"
 eyre.workspace = true
 facet.workspace = true
 facet-python.workspace = true

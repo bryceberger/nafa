@@ -1,3 +1,6 @@
+use std::time::{Duration, Instant};
+
+use bitflags::bitflags;
 use eyre::Result;
 use nafa_io::{
     Backend, Command, Controller,
@@ -54,16 +57,13 @@ async fn read_device_register_sized<const N: usize>(
 ) -> Result<&[u8; N]> {
     const { assert!(N.is_multiple_of(4)) };
     let n = u16::try_from(N / 4).unwrap();
-    read_device_register(
+    let slice = read_device_register(
         cont,
         active_slr,
         Type1::new(registers::OpCode::Read, addr, Words32(n)),
     )
-    .await
-    .map(|x| {
-        x.try_into()
-            .expect("dr_rx() should always return exact len")
-    })
+    .await?;
+    Ok(slice.try_into()?)
 }
 
 async fn read_jtag_register<B: Backend>(
@@ -111,15 +111,60 @@ pub async fn read_xadc<B: Backend>(
         .await
 }
 
-pub async fn program<B: Backend>(cont: &mut Controller<B>, data: &[u8]) -> Result<()> {
+bitflags! {
+    struct Status: u32 {
+        const INIT_COMPLETE = 0x0800;
+        const DONE          = 0x2000;
+    }
+}
+
+async fn is_done_status(cont: &mut Controller<impl Backend>) -> Option<Status> {
+    match read_device_register_word(cont, 0, Addr::Stat).await {
+        Ok(s) => {
+            let s = Status::from_bits_retain(s);
+            s.intersects(Status::INIT_COMPLETE).then_some(s)
+        }
+        _ => None,
+    }
+}
+
+pub struct ProgramStats {
+    pub time_shutdown: Duration,
+    pub time_program: Duration,
+    pub time_verify: Duration,
+    pub success: bool,
+}
+
+pub async fn program<B: Backend>(cont: &mut Controller<B>, data: &[u8]) -> Result<ProgramStats> {
+    let start = Instant::now();
+    cont.run([Command::ir(commands::JPROGRAM as _)]).await?;
+
+    while is_done_status(cont).await.is_none() {}
+    let end_shutdown = Instant::now();
+
     cont.run([
-        Command::ir(commands::JSHUTDOWN as _),
         Command::ir(commands::CFG_IN as _),
         Command::dr_tx_with_notification(data),
         Command::ir(commands::JSTART as _),
     ])
     .await?;
-    Ok(())
+    let end_program = Instant::now();
+
+    let success = loop {
+        match is_done_status(cont).await {
+            Some(x) if x.contains(Status::DONE) => break true,
+            Some(_) => break false,
+            None => {}
+        }
+    };
+    let end_status = Instant::now();
+
+    Ok(ProgramStats {
+        time_shutdown: end_shutdown - start,
+        time_program: end_program - end_shutdown,
+        time_verify: end_status - end_program,
+        success,
+    })
 }
 
 pub async fn readback<B: Backend>(cont: &mut Controller<B>, len: Bytes<usize>) -> Result<&[u8]> {

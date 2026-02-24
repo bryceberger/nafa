@@ -29,6 +29,21 @@ pub trait Backend: Send {
         after: Option<jtag::Path>,
     ) -> Result<()>;
 
+    // TODO: add a `capture_ir_and_flush()` function.
+    //
+    // I don't want to deal with bit-wise IO in the general case, with potentially
+    // interleaved bit / byte IO.
+    //
+    // However, some devices (xilinx) encode useful status information in the
+    // CAPTURE-IR value, that's not possible / annoying to get elsewhere.
+    //
+    // Therefore, add a function that:
+    // - is assumed (and can assert) that it's called in isolation:
+    //   - no outstanding reads / writes
+    // - goes into shift ir, rxtx a specified number of `1`s
+    //
+    // Notably, it would be a "synchronous" function, in that you don't call
+    // `.flush()` after and it always returns the data immediately.
     async fn bits(
         &mut self,
         buf: &mut dyn Buffer,

@@ -90,7 +90,7 @@ async fn async_main(Args { global, command }: Args) -> Result<()> {
         CliCommand::Readback(_) | CliCommand::Program(_) => !global.no_progress_bar,
         _ => false,
     };
-    if progress {
+    let action = if progress {
         let notify = &AtomicUsize::new(0);
         let done = &AtomicBool::new(false);
         let pb = &setup_progress_bar();
@@ -100,16 +100,19 @@ async fn async_main(Args { global, command }: Args) -> Result<()> {
                 pb.set_position(notify.load(Ordering::Acquire) as _);
                 smol::future::yield_now().await;
             }
-            Ok(())
+            unreachable!()
         };
         let runner = cont.with_notifications(notify, async |cont| {
             let r = run(command, cont, Some(pb)).await;
             done.store(true, Ordering::Release);
             r
         });
-        runner.race(progress).await?;
+        runner.race(progress).await?
     } else {
-        run(command, &mut cont, None).await?;
+        run(command, &mut cont, None).await?
+    };
+    if let Some(action) = action {
+        action()
     }
     Ok(())
 }
@@ -129,7 +132,7 @@ async fn run(
     command: CliCommand,
     cont: &mut Controller<Box<dyn Backend>>,
     pb: Option<&indicatif::ProgressBar>,
-) -> Result<()> {
+) -> Result<Option<Box<dyn FnOnce()>>> {
     match command {
         // no controller, handled earlier
         CliCommand::FlashXpc(_) => unreachable!(),
@@ -162,11 +165,23 @@ async fn run(
             if let Some(pb) = pb {
                 pb.set_length(data.len() as _)
             }
-            nafa_xilinx::_32bit::program(cont, &data).await?;
+
+            pub const fn as_millis(d: std::time::Duration) -> f32 {
+                const NANOS_PER_MILLI: u32 = 1_000_000;
+                (d.as_nanos() as f32) / (NANOS_PER_MILLI as f32)
+            }
+
+            let stats = nafa_xilinx::_32bit::program(cont, &data).await?;
+            return Ok(Some(Box::new(move || {
+                println!("shutdown: {:>7.3}ms", as_millis(stats.time_shutdown));
+                println!(" program: {:>7.3}ms", as_millis(stats.time_program));
+                println!("  verify: {:>7.3}ms", as_millis(stats.time_verify));
+                println!(" success: {}", stats.success);
+            })));
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 fn get_devices() -> HashMap<IdCode, DeviceInfo> {
