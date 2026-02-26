@@ -3,21 +3,6 @@
 //! These are _almost_ the same as the rest of the devices. However, they have
 //! an IRLEN of 12 instead of 6 --- there's a processor and FPGA stuck together
 //! acting as a single device.
-//!
-//! You'd _think_ that this would mean you send a noop to the processor and the
-//! actual command to the FPGA. However, for some reason, that gives garbled
-//! data. Instead, we duplicate the command and send it to both devices.
-//! Currently unknown _why_ this works, or if it works for all commands.
-//!
-//! The following strategies were tried:
-//!
-//! | strategy    | idcode | efuse |
-//! |-------------|--------|-------|
-//! | noop low    |   ✕    |   ✕   |
-//! | noop high   |   ✕    |   ✓   |
-//! | bypass low  |   ✓    |   ✕   |
-//! | bypass high |   ✕    |   ✓   |
-//! | replicated  |   ✓    |   ✓   |
 
 use eyre::Result;
 use nafa_io::{
@@ -26,16 +11,12 @@ use nafa_io::{
 };
 
 use crate::_32bit::{
-    bitstream_to_wire_order, commands,
+    bitstream_to_wire_order,
     registers::{Addr, OpCode, Type1},
 };
 
+pub mod commands;
 pub mod info;
-
-fn duplicate(cmd: u8) -> u32 {
-    let cmd = u32::from(cmd & 0b111111);
-    cmd << 6 | cmd
-}
 
 pub async fn read_device_register(
     cont: &mut Controller<impl Backend>,
@@ -46,9 +27,9 @@ pub async fn read_device_register(
     let tiny_bitstream = tiny_bitstream.as_flattened();
 
     cont.run([
-        Command::ir(commands::CFG_IN as _),
+        Command::ir(commands::CFG_IN),
         Command::dr_tx(tiny_bitstream),
-        Command::ir(commands::CFG_OUT as _),
+        Command::ir(commands::CFG_OUT),
         Command::dr_rx(Bytes::from(reg.word_count.into_())),
     ])
     .await
@@ -76,16 +57,15 @@ async fn read_device_register_sized<const N: usize>(
 
 async fn read_jtag_register<B: Backend>(
     cont: &mut Controller<B>,
-    inst: u8,
+    inst: u32,
     len: Bytes<usize>,
 ) -> Result<&[u8]> {
-    cont.run([Command::ir(duplicate(inst)), Command::dr_rx(len)])
-        .await
+    cont.run([Command::ir(inst), Command::dr_rx(len)]).await
 }
 
 async fn read_jtag_register_sized<const N: usize, B: Backend>(
     cont: &mut Controller<B>,
-    inst: u8,
+    inst: u32,
 ) -> Result<&[u8; N]> {
     read_jtag_register(cont, inst, Bytes(N)).await.map(|x| {
         x.try_into()

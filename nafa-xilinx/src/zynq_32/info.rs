@@ -7,39 +7,59 @@ use super::{
 };
 use crate::{
     _32bit::{
-        commands,
-        info::{Registers, RegistersPerSlr, UPJtag, UPJtagPerDevice, USJtagPerSlr},
+        info::{Registers, RegistersPerSlr},
         registers::Addr,
     },
     Read,
+    zynq_32::commands,
 };
 
 #[derive(Facet)]
 pub struct ZP {
-    pub jtag: UPJtag,
+    pub jtag: ZPJtag,
     pub registers: Registers,
+}
+
+#[derive(Facet)]
+pub struct ZPJtag {
+    pub idcode_ps: [u8; 4],
+    pub idcode_pl: [u8; 4],
+    pub idcode_pspl: [u8; 8],
+    pub usercode: [u8; 4],
+    pub jtag_status: [u8; 4],
+    pub jstatus: [u8; 4],
+    pub xsc_dna: [u8; 12],
+    pub fuse_key: [u8; 32],
+    pub fuse_dna: [u8; 8],
+    pub fuse_cntl: [u8; 4],
+    pub fuse_user_ps: [u8; 4],
+    pub user1: [u8; 4],
+    pub user2: [u8; 4],
+    pub user3: [u8; 4],
+    pub user4: [u8; 4],
+    // 121 bits
+    pub error_status: [u8; 16],
 }
 
 impl Read for ZP {
     async fn read(cont: &mut Controller<impl Backend>) -> Result<Self> {
-        let jtag = UPJtag {
-            device: UPJtagPerDevice {
-                cntl: *jtag_register(cont, commands::FUSE_CNTL).await?,
-            },
-            slrs: vec![USJtagPerSlr {
-                idcode: *jtag_register(cont, commands::IDCODE).await?,
-                usercode: *jtag_register(cont, commands::USERCODE).await?,
-                fuse_dna: *jtag_register(cont, commands::FUSE_DNA).await?,
-                fuse_key: *jtag_register(cont, commands::FUSE_KEY).await?,
-                fuse_user: *jtag_register(cont, commands::FUSE_USER).await?,
-                fuse_user_128: *jtag_register(cont, commands::FUSE_USER_128).await?,
-                fuse_rsa: *jtag_register(cont, commands::FUSE_RSA).await?,
-                fuse_sec: *jtag_register(cont, commands::FUSE_SEC).await?,
-                user1: *jtag_register(cont, commands::USER1).await?,
-                user2: *jtag_register(cont, commands::USER2).await?,
-                user3: *jtag_register(cont, commands::USER3).await?,
-                user4: *jtag_register(cont, commands::USER4).await?,
-            }],
+        let jtag = ZPJtag {
+            idcode_ps: *jtag_register(cont, commands::IDCODE).await?,
+            idcode_pl: *jtag_register(cont, commands::IDCODE_PL).await?,
+            idcode_pspl: *jtag_register(cont, commands::IDCODE_PSPL).await?,
+            usercode: *jtag_register(cont, commands::USERCODE).await?,
+            jtag_status: *jtag_register(cont, commands::JTAG_STATUS).await?,
+            jstatus: *jtag_register(cont, commands::JSTATUS).await?,
+            xsc_dna: *jtag_register(cont, commands::XSC_DNA).await?,
+            fuse_key: *jtag_register(cont, commands::FUSE_KEY).await?,
+            fuse_dna: *jtag_register(cont, commands::FUSE_DNA).await?,
+            fuse_cntl: *jtag_register(cont, commands::FUSE_CNTL).await?,
+            fuse_user_ps: *jtag_register(cont, commands::FUSE_USER_PS).await?,
+            user1: *jtag_register(cont, commands::USER1).await?,
+            user2: *jtag_register(cont, commands::USER2).await?,
+            user3: *jtag_register(cont, commands::USER3).await?,
+            user4: *jtag_register(cont, commands::USER4).await?,
+            error_status: *jtag_register(cont, commands::ERROR_STATUS).await?,
         };
         let registers = Registers {
             slrs: vec![RegistersPerSlr {
