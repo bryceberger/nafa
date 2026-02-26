@@ -6,12 +6,7 @@ use std::{
 
 use clap::Parser;
 use color_eyre::Result;
-use nafa_io::{
-    Backend, Controller,
-    devices::{DeviceInfo, IdCode},
-    units::Bytes,
-    xpc,
-};
+use nafa_io::{Backend, Controller, devices::DeviceInfo, jtag::IdCode, units::Bytes, xpc};
 use smol::future::FutureExt;
 
 use crate::cli_helpers::UsbAddr;
