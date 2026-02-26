@@ -46,7 +46,10 @@ struct GlobalOpts {
 
 #[derive(clap::Subcommand)]
 enum CliCommand {
-    Info,
+    Info {
+        #[arg(short, long)]
+        pretty: bool,
+    },
     InfoXadc,
     FlashXpc(FlashXpc),
     Readback(Readback),
@@ -138,8 +141,8 @@ async fn run(
         CliCommand::FlashXpc(_) => unreachable!(),
 
         // controller
-        CliCommand::Info => {
-            info(cont).await?;
+        CliCommand::Info { pretty } => {
+            info(cont, pretty).await?;
         }
         CliCommand::InfoXadc => {
             info_xadc(cont).await?;
@@ -259,28 +262,35 @@ async fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
     Ok(())
 }
 
-async fn info(cont: &mut Controller<impl Backend>) -> Result<()> {
+async fn info(cont: &mut Controller<impl Backend>, pretty: bool) -> Result<()> {
+    use facet_pretty::FacetPretty;
     use nafa_io::devices::{Specific as S, Xilinx32Family as F, Xilinx32Info as I};
     use nafa_xilinx::{_32bit::info as info_32, read, zynq_32::info as info_zynq};
-
-    let stdout = std::io::stdout().lock();
+    fn print<'a, F: facet::Facet<'a>>(info: F, pretty: bool) -> Result<()> {
+        if pretty {
+            println!("{}", info.pretty());
+        } else {
+            facet_json::to_writer_std(std::io::stdout(), &info)?;
+        }
+        Ok(())
+    }
 
     match cont.info().specific {
         S::Xilinx32(I { family: F::S7, .. }) => {
             let info: info_32::S7 = read(cont).await?;
-            facet_json::to_writer_std(stdout, &info)?;
+            print(info, pretty)?;
         }
         S::Xilinx32(I { family: F::US, .. }) => {
             let info: info_32::US = read(cont).await?;
-            facet_json::to_writer_std(stdout, &info)?;
+            print(info, pretty)?;
         }
         S::Xilinx32(I { family: F::UP, .. }) => {
             let info: info_32::UP = read(cont).await?;
-            facet_json::to_writer_std(stdout, &info)?;
+            print(info, pretty)?;
         }
         S::Xilinx32(I { family: F::ZP, .. }) => {
             let info: info_zynq::ZP = read(cont).await?;
-            facet_json::to_writer_std(stdout, &info)?;
+            print(info, pretty)?;
         }
         _ => return Err(eyre::eyre!("unsupported device")),
     }
