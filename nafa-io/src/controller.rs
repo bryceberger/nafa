@@ -8,8 +8,8 @@ use eyre::{Result, eyre};
 use crate::{
     Backend, Buffer,
     backend::Data,
-    devices::{DeviceInfo, IdCode},
-    jtag::{PATHS, Path, State},
+    devices::DeviceInfo,
+    jtag::{IdCode, PATHS, Path, State},
     units::{Bits, Bytes},
 };
 
@@ -40,12 +40,35 @@ pub struct Controller<B> {
     buf: Vec<u8>,
 }
 
+fn max_possible_combined_irlen(ircapture: &[u8]) -> Bits<usize> {
+    let Some(pos) = ircapture.iter().rposition(|x| *x != 0xff) else {
+        return Bits(0);
+    };
+    let mut val = ircapture[pos];
+    let mut extra = 0;
+    while val & 0x80 == 0x80 {
+        val <<= 1;
+        extra += 1;
+    }
+    Bits(pos * 8 + 8 - extra)
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn detect_chain<B: Backend>(
     backend: &mut B,
     devices: &HashMap<IdCode, DeviceInfo>,
 ) -> Result<Vec<(u32, DeviceInfo)>> {
     let buf = &mut Vec::new();
+
+    let to_sir = Some(PATHS[State::TestLogicReset][State::ShiftIR]);
+    let to_reset = Some(PATHS[State::ShiftIR][State::TestLogicReset]);
+    let capture = Data::TxRx(&[0xff; 16]);
+    backend.tms(buf, Path::RESET).await?;
+    backend.bytes(buf, to_sir, capture, to_reset).await?;
+    backend.flush(buf).await?;
+    tracing::info!(capture = %crate::ShortHex(buf), maybe_irlen = ?max_possible_combined_irlen(buf));
+    buf.clear();
+
     let reset_to_idle = PATHS[State::TestLogicReset][State::RunTestIdle];
     backend.tms(buf, Path::RESET).await?;
     backend.tms(buf, Path::RESET).await?;
@@ -55,8 +78,23 @@ pub async fn detect_chain<B: Backend>(
     let sdr_to_idle = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
 
     let get_info = |idcode| -> Result<DeviceInfo> {
-        let Some(info) = devices.get(&IdCode::new(idcode)) else {
-            return Err(eyre!("idcode {idcode:08X} not found in device list"));
+        let idcode = IdCode::new(idcode);
+        let Some(info) = devices
+            .get(&idcode)
+            .or_else(|| devices.get(&idcode.strip_version()))
+        else {
+            return Err(eyre!(
+                "\
+idcode {code:08X} not found in device list
+    manufacturer 0x{mfg:03X} ({mfg_str})
+    part         0x{part:04X}
+    version      0x{version:X}",
+                code = idcode.code(),
+                mfg = idcode.manufacturer(),
+                mfg_str = idcode.manufacturer_name().unwrap_or("<unknown>"),
+                part = idcode.part(),
+                version = idcode.version(),
+            ));
         };
         assert!(info.irlen <= Bits(32));
         Ok(info.clone())

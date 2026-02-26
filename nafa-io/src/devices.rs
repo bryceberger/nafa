@@ -1,8 +1,7 @@
-use crate::units::{Bits, Words32};
-
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct IdCode(u32);
+use crate::{
+    jtag::IdCode,
+    units::{Bits, Words32},
+};
 
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {
@@ -37,31 +36,6 @@ pub enum Xilinx32Family {
     /// Zync Ultrascale+
     ZP,
     Versal,
-}
-
-impl IdCode {
-    pub const fn new(code: u32) -> Self {
-        /// IEEE 11491-2013, Figure 12-1, "Structure of the device
-        /// identification code"
-        const VERSION: u32 = 0xf0000000;
-        Self(code & !VERSION)
-    }
-
-    pub const fn code(self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for IdCode {
-    fn from(value: u32) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<IdCode> for u32 {
-    fn from(val: IdCode) -> Self {
-        val.code()
-    }
 }
 
 /// Returns iterator of `(idcode, info)`. Intended to be collected into a

@@ -7,6 +7,63 @@ use std::{
 
 use strum::VariantArray;
 
+mod jep106;
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct IdCode(u32);
+
+impl IdCode {
+    pub const fn new(code: u32) -> Self {
+        Self(code)
+    }
+
+    pub const fn strip_version(self) -> Self {
+        /// IEEE 11491-2013, Figure 12-1, "Structure of the device
+        /// identification code"
+        const VERSION: u32 = 0xf0000000;
+        Self(self.0 & !VERSION)
+    }
+
+    pub const fn code(self) -> u32 {
+        self.0
+    }
+
+    pub const fn version(self) -> u8 {
+        ((self.0 >> 28) as u8) & 0xf
+    }
+
+    pub const fn part(self) -> u16 {
+        (self.0 >> 12) as u16
+    }
+
+    pub const fn manufacturer(self) -> u16 {
+        ((self.0 >> 1) as u16) & 0x7ff
+    }
+
+    pub fn manufacturer_name(self) -> Option<&'static str> {
+        let mfg = self.manufacturer();
+
+        let bank = mfg >> 7;
+        let bank = jep106::TABLE.get(bank as usize)?;
+
+        let idx = mfg & 0x7f;
+        *bank.get(idx.checked_sub(1)? as usize)?
+    }
+}
+
+impl From<u32> for IdCode {
+    fn from(value: u32) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<IdCode> for u32 {
+    fn from(val: IdCode) -> Self {
+        val.code()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
 #[repr(u8)]
 pub enum State {
