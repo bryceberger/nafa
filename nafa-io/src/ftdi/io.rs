@@ -100,7 +100,7 @@ impl Device {
             .endpoint::<transfer::Bulk, transfer::Out>(self.endpoints.in_)?
             .writer(CHUNK_SIZE)
             .with_write_timeout(TIMEOUT);
-        tracing::info!(len = %data.len(), buf = %crate::SpaceHex(data), "writing");
+        tracing::debug!(len = %data.len(), buf = %crate::ShortHex(data));
         writer.write_all(data).await?;
         writer.flush().await?;
         Ok(())
@@ -128,9 +128,8 @@ impl Device {
 
         let mut actual_bytes_read = 0;
         while !buf.is_empty() {
-            tracing::info!(len = %read_buffer.len(), buf = %crate::SpaceHex(buf), "reading");
             let bytes_read = reader.read(read_buffer).await?;
-            tracing::info!(bytes_read, read = %crate::SpaceHex(&read_buffer[..bytes_read]));
+            tracing::debug!(len = %read_buffer.len(), bytes_read, read = %crate::ShortHex(&read_buffer[..bytes_read]));
             if bytes_read <= 2 {
                 break;
             }
