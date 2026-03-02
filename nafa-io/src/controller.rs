@@ -102,18 +102,18 @@ idcode {code:08X} not found in device list
 
     let mut ret = Vec::new();
     loop {
-        let to_read = Bytes((ret.len() + 1) * 4);
-        backend
-            .bytes(buf, idle_to_sdr, Data::Rx(to_read), sdr_to_idle)
-            .await?;
+        let rx = Data::Rx(Bytes((ret.len() + 1) * 4));
+        backend.bytes(buf, idle_to_sdr, rx, sdr_to_idle).await?;
         backend.flush(buf).await?;
 
         let (ids, []) = buf.as_chunks() else {
             return Err(eyre!(
-                "failed to fill idcode, or returned extra data: {buf:02X?}"
+                "failed to fill idcode, or returned extra data: {}",
+                crate::ShortHex(buf),
             ));
         };
         let id = ids[ret.len()];
+        tracing::info!(id = %crate::ShortHex(&id));
         match u32::from_le_bytes(id) {
             // reached end of chain
             0xffff_ffff => {
