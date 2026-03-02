@@ -43,6 +43,7 @@ struct GlobalOpts {
 
 #[derive(clap::Subcommand)]
 enum CliCommand {
+    DetectChain,
     Info {
         #[arg(short, long)]
         pretty: bool,
@@ -82,11 +83,22 @@ fn main() -> Result<()> {
 
 async fn async_main(Args { global, command }: Args) -> Result<()> {
     // no controller
-    if let CliCommand::Flash(flash) = command {
-        return flash_xpc(global.usb, flash).await;
+    match command {
+        CliCommand::Flash(flash) => return flash_xpc(global.usb, flash).await,
+        CliCommand::DetectChain => {
+            let backend = &mut get_backend(global.usb).await?;
+            let chain = nafa_io::detect_chain(backend, &get_device_map()).await?;
+            for (idx, (idcode, info)) in chain.iter().enumerate() {
+                let code = idcode.code();
+                let info = nafa_io::controller::IdCodeInfo::new(4, *idcode, Some(info));
+                println!("{idx}: {code:08X}\n{info}");
+            }
+            return Ok(());
+        }
+        _ => (),
     }
 
-    let mut cont = get_controller(&get_devices(), global.usb, global.jtag_idx).await?;
+    let mut cont = get_controller(&get_device_map(), global.usb, global.jtag_idx).await?;
     let progress = match command {
         CliCommand::Readback(_) | CliCommand::Program(_) => !global.no_progress_bar,
         _ => false,
@@ -136,7 +148,7 @@ async fn run(
 ) -> Result<Option<Box<dyn FnOnce()>>> {
     match command {
         // no controller, handled earlier
-        CliCommand::Flash(_) => unreachable!(),
+        CliCommand::Flash(_) | CliCommand::DetectChain => unreachable!(),
 
         // controller
         CliCommand::Info { pretty } => {
@@ -185,8 +197,26 @@ async fn run(
     Ok(None)
 }
 
-fn get_devices() -> HashMap<IdCode, DeviceInfo> {
+fn get_device_map() -> HashMap<IdCode, DeviceInfo> {
     nafa_io::devices::builtin().collect()
+}
+
+async fn get_device(addr: UsbAddr) -> Result<nusb::DeviceInfo> {
+    let Some(device) = nusb::list_devices()
+        .await?
+        .find(|d| d.vendor_id() == addr.vid && d.product_id() == addr.pid)
+    else {
+        return Err(eyre::eyre!("failed to open device {addr}"));
+    };
+    Ok(device)
+}
+
+async fn get_backend(addr: UsbAddr) -> Result<Box<dyn Backend>, eyre::Error> {
+    let device = get_device(addr).await?;
+    match nafa_io::cables::init(device).await {
+        Ok(b) => Ok(b),
+        Err(errs) => Err(eyre::eyre!("failed to init cable: {errs:?}")),
+    }
 }
 
 async fn get_controller(
@@ -194,21 +224,19 @@ async fn get_controller(
     addr: UsbAddr,
     jtag_idx: Option<usize>,
 ) -> Result<Controller<Box<dyn Backend>>> {
-    fn chain_info(devices: &[(u32, DeviceInfo)]) -> String {
+    fn chain_info(devices: &[(IdCode, DeviceInfo)]) -> String {
         let devices = devices.iter().enumerate();
         devices.fold(String::new(), |mut acc, (idx, (idcode, info))| {
             use std::fmt::Write;
-            write!(&mut acc, "\n    {idx:>2}: {idcode:08X} {}", info.name)
+            let code = idcode.code();
+            let name = info.name;
+            write!(&mut acc, "\n    {idx:>2}: {code:08X} {name}")
                 .expect("write to string cannot fail");
             acc
         })
     }
 
-    let device = get_device(addr).await?;
-    let mut backend = match nafa_io::cables::init(device).await {
-        Ok(b) => b,
-        Err(errs) => return Err(eyre::eyre!("{:?}", errs)),
-    };
+    let mut backend = get_backend(addr).await?;
 
     let devices = nafa_io::detect_chain(&mut backend, devices).await?;
     let (before, device, after) = match (&devices[..], jtag_idx) {
@@ -230,25 +258,13 @@ async fn get_controller(
         }
 
         (multiple, Some(idx)) => {
-            let collect =
-                |items: &[(u32, DeviceInfo)]| items.iter().map(|(_, info)| info.clone()).collect();
-            let before = collect(&multiple[..idx]);
+            let before = multiple[..idx].to_vec();
             let chosen = multiple[idx].clone();
-            let after = collect(&multiple[idx + 1..]);
+            let after = multiple[idx + 1..].to_vec();
             (before, chosen, after)
         }
     };
     Controller::new(backend, before, device, after).await
-}
-
-async fn get_device(addr: UsbAddr) -> Result<nusb::DeviceInfo> {
-    let Some(device) = nusb::list_devices()
-        .await?
-        .find(|d| d.vendor_id() == addr.vid && d.product_id() == addr.pid)
-    else {
-        return Err(eyre::eyre!("failed to open device {addr}"));
-    };
-    Ok(device)
 }
 
 async fn flash_xpc(addr: UsbAddr, args: Flash) -> Result<()> {
@@ -304,7 +320,7 @@ async fn info_xadc<B: Backend>(cont: &mut Controller<B>) -> Result<()> {
         nafa_io::devices::Specific::Xilinx32(info) => info.family,
     };
 
-    println!("idcode: {:04X}", cont.idcode());
+    println!("idcode: {:04X}", cont.idcode().code());
     println!("  name: {}", cont.info().name);
 
     let c = |addr| Command {

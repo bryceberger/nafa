@@ -33,10 +33,9 @@ impl<T> Copy for Ptr<T> {}
 
 pub struct Controller<B> {
     backend: B,
-    idcode: u32,
-    before: Vec<DeviceInfo>,
-    info: DeviceInfo,
-    after: Vec<DeviceInfo>,
+    before: Vec<(IdCode, DeviceInfo)>,
+    active: (IdCode, DeviceInfo),
+    after: Vec<(IdCode, DeviceInfo)>,
     notify: Ptr<AtomicUsize>,
     buf: Vec<u8>,
 }
@@ -54,36 +53,47 @@ fn max_possible_combined_irlen(ircapture: &[u8]) -> Bits<usize> {
     Bits(pos * 8 + 8 - extra)
 }
 
-fn get_info(
-    devices: &HashMap<IdCode, DeviceInfo>,
-    current_chain: &[(u32, DeviceInfo)],
-    idcode: u32,
-) -> Result<DeviceInfo> {
-    struct IdCodeInfo<'a, const INDENT: usize> {
-        idcode: IdCode,
-        info: Option<&'a DeviceInfo>,
-    }
-    impl<const INDENT: usize> std::fmt::Display for IdCodeInfo<'_, INDENT> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                concat!(
-                    "{i:il$}manufacturer 0x{mfg:03X}  ({mfg_str})\n",
-                    "{i:il$}part         0x{part:04X} ({part_str})\n",
-                    "{i:il$}version      0x{version:X}",
-                ),
-                i = "",
-                il = INDENT,
-                mfg = self.idcode.manufacturer(),
-                mfg_str = self.idcode.manufacturer_name().unwrap_or("<unknown>"),
-                part = self.idcode.part(),
-                part_str = self.info.map_or("<unknown>", |p| p.name),
-                version = self.idcode.version(),
-            )
+pub struct IdCodeInfo<'a> {
+    pub indent: usize,
+    pub idcode: IdCode,
+    pub info: Option<&'a DeviceInfo>,
+}
+impl<'a> IdCodeInfo<'a> {
+    pub fn new(indent: usize, idcode: IdCode, info: Option<&'a DeviceInfo>) -> Self {
+        Self {
+            indent,
+            idcode,
+            info,
         }
     }
+}
+impl std::fmt::Display for IdCodeInfo<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            concat!(
+                "{i:il$}manufacturer 0x{mfg:03X}  ({mfg_str})\n",
+                "{i:il$}part         0x{part:04X} ({part_str})\n",
+                "{i:il$}version      0x{version:X}\n",
+                "{i:il$}irlen        {irlen}",
+            ),
+            i = "",
+            il = self.indent,
+            mfg = self.idcode.manufacturer(),
+            mfg_str = self.idcode.manufacturer_name().unwrap_or("<unknown>"),
+            part = self.idcode.part(),
+            part_str = self.info.map_or("<unknown>", |p| p.name),
+            version = self.idcode.version(),
+            irlen = self.info.map_or(0, |i| i.irlen.0),
+        )
+    }
+}
 
-    let idcode = IdCode::new(idcode);
+fn get_info(
+    devices: &HashMap<IdCode, DeviceInfo>,
+    chain: &[(IdCode, DeviceInfo)],
+    idcode: IdCode,
+) -> Result<DeviceInfo> {
     let info = devices
         .get(&idcode)
         .or_else(|| devices.get(&idcode.strip_version()));
@@ -91,17 +101,14 @@ fn get_info(
         let mut err = eyre!(
             "idcode {code:08X} not found in device list\n{info}",
             code = idcode.code(),
-            info = IdCodeInfo::<4> { idcode, info: None },
+            info = IdCodeInfo::new(4, idcode, None),
         )
         .wrap_err("cannot determine irlen");
 
         let shifted = IdCode::new(idcode.code() >> 1);
-        if let Some(info) = devices.get(&shifted) {
+        if let info @ Some(_) = devices.get(&shifted) {
             let code = shifted.code();
-            let info = IdCodeInfo::<4> {
-                idcode: shifted,
-                info: Some(info),
-            };
+            let info = IdCodeInfo::new(4, shifted, info);
             err = err.note(format!(
                 "idcode {code:08X} was found in device list, possible device in bypass\n{info}"
             ));
@@ -110,15 +117,13 @@ fn get_info(
         err = err.section({
             use std::fmt::Write;
             let mut msg = String::new();
-            for (idx, (idcode, info)) in current_chain.iter().enumerate() {
-                let info = IdCodeInfo::<7> {
-                    idcode: IdCode::new(*idcode),
-                    info: Some(info),
-                };
+            for (idx, (idcode, info)) in chain.iter().enumerate() {
+                let code = idcode.code();
+                let info = IdCodeInfo::new(7, *idcode, Some(info));
                 if idx != 0 {
                     msg.push('\n');
                 }
-                write!(&mut msg, "{idx}: idcode {idcode:08X}\n{info}",)
+                write!(&mut msg, "{idx}: idcode {code:08X}\n{info}")
                     .expect("write!() to string cannot fail");
             }
             msg.header("Current chain:")
@@ -134,7 +139,7 @@ fn get_info(
 pub async fn detect_chain<B: Backend>(
     backend: &mut B,
     devices: &HashMap<IdCode, DeviceInfo>,
-) -> Result<Vec<(u32, DeviceInfo)>> {
+) -> Result<Vec<(IdCode, DeviceInfo)>> {
     let buf = &mut Vec::new();
 
     let to_sir = Some(PATHS[State::TestLogicReset][State::ShiftIR]);
@@ -179,7 +184,7 @@ pub async fn detect_chain<B: Backend>(
                 buf.clear();
                 let idcode = zynq_us_init_arm_dap(backend, buf).await?;
                 let info = get_info(devices, &ret, idcode)?;
-                ret.push((idcode, info.clone()));
+                ret.push((idcode, info));
             }
 
             // IDCODE guaranteed to start with a `1` bit, BYPASS as a single `0`. Nothing we can
@@ -187,12 +192,13 @@ pub async fn detect_chain<B: Backend>(
             // input fed back, but that's annoying. All devices we care about start with IDCODE
             // anyway.
             idcode if idcode & 1 != 1 => {
-                return Err(eyre!("device in BYPASS detected: {idcode:08X}",));
+                return Err(eyre!("device in BYPASS detected: {idcode:08X}"));
             }
 
             idcode => {
+                let idcode = IdCode::new(idcode);
                 let info = get_info(devices, &ret, idcode)?;
-                ret.push((idcode, info.clone()));
+                ret.push((idcode, info));
             }
         }
         buf.clear();
@@ -202,7 +208,7 @@ pub async fn detect_chain<B: Backend>(
 }
 
 #[tracing::instrument(skip_all)]
-async fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) -> Result<u32> {
+async fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) -> Result<IdCode> {
     let reset_to_sir = Some(PATHS[State::TestLogicReset][State::ShiftIR]);
     let sir_to_idle = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
     let idle_to_sdr = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
@@ -232,7 +238,7 @@ async fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) ->
     match u32::from_le_bytes(*id) {
         0xffff_ffff => Err(eyre!("end of chain after zynq us special case ???")),
         idcode if idcode & 1 != 1 => Err(eyre!("still in bypass after zynq us special case")),
-        idcode => Ok(idcode),
+        idcode => Ok(IdCode::new(idcode)),
     }
 }
 
@@ -240,9 +246,9 @@ impl<B: Backend> Controller<B> {
     #[tracing::instrument(skip_all)]
     pub async fn new(
         mut backend: B,
-        before: Vec<DeviceInfo>,
-        (idcode, info): (u32, DeviceInfo),
-        after: Vec<DeviceInfo>,
+        before: Vec<(IdCode, DeviceInfo)>,
+        active: (IdCode, DeviceInfo),
+        after: Vec<(IdCode, DeviceInfo)>,
     ) -> Result<Self> {
         let mut buf = Vec::new();
         let reset_to_idle = PATHS[State::TestLogicReset][State::RunTestIdle];
@@ -255,19 +261,26 @@ impl<B: Backend> Controller<B> {
             backend,
             buf,
             before,
-            info,
+            active,
             after,
-            idcode,
             notify: Ptr(std::ptr::null()),
         })
     }
 
     pub fn info(&self) -> &DeviceInfo {
-        &self.info
+        &self.active.1
     }
 
-    pub fn idcode(&self) -> u32 {
-        self.idcode
+    pub fn idcode(&self) -> IdCode {
+        self.active.0
+    }
+
+    pub fn info_before(&self) -> &[(IdCode, DeviceInfo)] {
+        &self.before
+    }
+
+    pub fn info_after(&self) -> &[(IdCode, DeviceInfo)] {
+        &self.after
     }
 
     pub async fn with_notifications<T>(
@@ -301,10 +314,9 @@ impl<B: Backend> Controller<B> {
             ref mut backend,
             ref mut buf,
             ref before,
-            ref info,
+            active: (_, ref info),
             ref after,
             notify,
-            idcode: _,
         } = *self;
         let notify = if notify.0.is_null() {
             None
@@ -313,8 +325,8 @@ impl<B: Backend> Controller<B> {
         };
         buf.clear();
 
-        let irlen_before: Bits<u8> = Bits(before.iter().map(|i| i.irlen.0).sum());
-        let irlen_after: Bits<u8> = Bits(after.iter().map(|i| i.irlen.0).sum());
+        let irlen_before: Bits<u8> = Bits(before.iter().map(|i| i.1.irlen.0).sum());
+        let irlen_after: Bits<u8> = Bits(after.iter().map(|i| i.1.irlen.0).sum());
 
         let devices_before = before.len();
         let devices_after = after.len();

@@ -1,6 +1,6 @@
 mod backend;
 pub mod cables;
-mod controller;
+pub mod controller;
 pub mod devices;
 pub mod ftdi;
 pub mod jtag;

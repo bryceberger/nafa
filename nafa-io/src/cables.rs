@@ -25,10 +25,6 @@ pub async fn init(device: nusb::DeviceInfo) -> Result<BoxedBackend, Vec<eyre::Re
         }
     }
 
-    if errs.is_empty() {
-        errs.push(eyre::eyre!("no cables matched vid:pid"));
-    }
-
     Err(errs)
 }
 
