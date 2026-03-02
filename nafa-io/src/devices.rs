@@ -41,7 +41,25 @@ pub enum Xilinx32Family {
 /// Returns iterator of `(idcode, info)`. Intended to be collected into a
 /// `HashMap`, to be passed to [`crate::Controller::new`].
 pub fn builtin() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
-    xilinx()
+    [].into_iter().chain(xilinx()).chain(intel())
+}
+
+const fn id(code: u32) -> IdCode {
+    IdCode::new(code)
+}
+
+fn intel() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
+    use Bits as B;
+    use Specific as S;
+
+    #[rustfmt::skip]
+    static DEVICES: &[(IdCode, DeviceInfo)] = &[
+        (id(0x020D10DD), DeviceInfo { irlen: B(10), name: "vtap10",  specific: S::Unknown }),
+        (id(0x020F30DD), DeviceInfo { irlen: B(10), name: "10CL025", specific: S::Unknown }),
+        (id(0x031820DD), DeviceInfo { irlen: B(10), name: "10M08S",  specific: S::Unknown }),
+    ];
+
+    DEVICES.iter().cloned()
 }
 
 fn xilinx() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
@@ -50,10 +68,6 @@ fn xilinx() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
     use Words32 as W;
     use Xilinx32Family as F;
     use Xilinx32Info as X;
-
-    const fn id(code: u32) -> IdCode {
-        IdCode::new(code)
-    }
 
     #[rustfmt::skip]
     static DEVICES: &[(IdCode, DeviceInfo)] = &[

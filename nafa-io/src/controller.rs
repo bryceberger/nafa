@@ -107,6 +107,7 @@ idcode {code:08X} not found in device list
             .bytes(buf, idle_to_sdr, Data::Rx(to_read), sdr_to_idle)
             .await?;
         backend.flush(buf).await?;
+        tracing::info!(data = %crate::ShortHex(buf));
 
         let (ids, []) = buf.as_chunks() else {
             return Err(eyre!(

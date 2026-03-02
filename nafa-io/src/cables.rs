@@ -2,7 +2,7 @@ use std::pin::Pin;
 
 use eyre::Result;
 
-use crate::{Backend, ftdi, xpc};
+use crate::{Backend, ftdi, usb_blaster, xpc};
 
 type BoxedBackend = Box<dyn Backend>;
 type InitResult = Pin<Box<dyn Future<Output = Result<BoxedBackend>>>>;
@@ -124,5 +124,8 @@ pub const KNOWN: &[Cable] = &[
     }),
     c(0x03fd, 0x0008, "xpc", |device| {
         Box::pin(async { Ok(Box::new(xpc::Device::new(device).await?) as BoxedBackend) })
+    }),
+    c(0x09fb, 0x6010, "usb-blaster II", |device| {
+        Box::pin(async { Ok(Box::new(usb_blaster::Device::new(device).await?) as BoxedBackend) })
     }),
 ];
