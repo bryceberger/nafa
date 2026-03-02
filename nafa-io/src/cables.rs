@@ -90,7 +90,7 @@ pub const KNOWN: &[Cable] = &[
         init_ftdi(device, &ftdi::devices::IKDA, 1500000)
     }),
     c(0x0403, 0x6014, "jtaghs2", |device| {
-        init_ftdi(device, &ftdi::devices::JTAGHS2, 30000000)
+        init_ftdi(device, &ftdi::devices::JTAGHS2, 15000000)
     }),
     c(0x0403, 0x6010, "l_motctl", |device| {
         init_ftdi(device, &ftdi::devices::L_MOTCTL, 8000000)
