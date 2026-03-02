@@ -3,6 +3,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use color_eyre::{Section as _, SectionExt as _};
 use eyre::{Result, eyre};
 
 use crate::{
@@ -53,6 +54,82 @@ fn max_possible_combined_irlen(ircapture: &[u8]) -> Bits<usize> {
     Bits(pos * 8 + 8 - extra)
 }
 
+fn get_info(
+    devices: &HashMap<IdCode, DeviceInfo>,
+    current_chain: &[(u32, DeviceInfo)],
+    idcode: u32,
+) -> Result<DeviceInfo> {
+    struct IdCodeInfo<'a, const INDENT: usize> {
+        idcode: IdCode,
+        info: Option<&'a DeviceInfo>,
+    }
+    impl<const INDENT: usize> std::fmt::Display for IdCodeInfo<'_, INDENT> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                concat!(
+                    "{i:il$}manufacturer 0x{mfg:03X}  ({mfg_str})\n",
+                    "{i:il$}part         0x{part:04X} ({part_str})\n",
+                    "{i:il$}version      0x{version:X}",
+                ),
+                i = "",
+                il = INDENT,
+                mfg = self.idcode.manufacturer(),
+                mfg_str = self.idcode.manufacturer_name().unwrap_or("<unknown>"),
+                part = self.idcode.part(),
+                part_str = self.info.map_or("<unknown>", |p| p.name),
+                version = self.idcode.version(),
+            )
+        }
+    }
+
+    let idcode = IdCode::new(idcode);
+    let info = devices
+        .get(&idcode)
+        .or_else(|| devices.get(&idcode.strip_version()));
+    let Some(info) = info else {
+        let mut err = eyre!(
+            "idcode {code:08X} not found in device list\n{info}",
+            code = idcode.code(),
+            info = IdCodeInfo::<4> { idcode, info: None },
+        )
+        .wrap_err("cannot determine irlen");
+
+        let shifted = IdCode::new(idcode.code() >> 1);
+        if let Some(info) = devices.get(&shifted) {
+            let code = shifted.code();
+            let info = IdCodeInfo::<4> {
+                idcode: shifted,
+                info: Some(info),
+            };
+            err = err.note(format!(
+                "idcode {code:08X} was found in device list, possible device in bypass\n{info}"
+            ));
+        }
+
+        err = err.section({
+            use std::fmt::Write;
+            let mut msg = String::new();
+            for (idx, (idcode, info)) in current_chain.iter().enumerate() {
+                let info = IdCodeInfo::<7> {
+                    idcode: IdCode::new(*idcode),
+                    info: Some(info),
+                };
+                if idx != 0 {
+                    msg.push('\n');
+                }
+                write!(&mut msg, "{idx}: idcode {idcode:08X}\n{info}",)
+                    .expect("write!() to string cannot fail");
+            }
+            msg.header("Current chain:")
+        });
+
+        return Err(err);
+    };
+    assert!(info.irlen <= Bits(32));
+    Ok(info.clone())
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn detect_chain<B: Backend>(
     backend: &mut B,
@@ -76,29 +153,6 @@ pub async fn detect_chain<B: Backend>(
 
     let idle_to_sdr = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
     let sdr_to_idle = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
-
-    let get_info = |idcode| -> Result<DeviceInfo> {
-        let idcode = IdCode::new(idcode);
-        let Some(info) = devices
-            .get(&idcode)
-            .or_else(|| devices.get(&idcode.strip_version()))
-        else {
-            return Err(eyre!(
-                "\
-idcode {code:08X} not found in device list
-    manufacturer 0x{mfg:03X} ({mfg_str})
-    part         0x{part:04X}
-    version      0x{version:X}",
-                code = idcode.code(),
-                mfg = idcode.manufacturer(),
-                mfg_str = idcode.manufacturer_name().unwrap_or("<unknown>"),
-                part = idcode.part(),
-                version = idcode.version(),
-            ));
-        };
-        assert!(info.irlen <= Bits(32));
-        Ok(info.clone())
-    };
 
     let mut ret = Vec::new();
     loop {
@@ -124,7 +178,7 @@ idcode {code:08X} not found in device list
             idcode if ret.is_empty() && idcode & 0xfff == (0x093 << 1) => {
                 buf.clear();
                 let idcode = zynq_us_init_arm_dap(backend, buf).await?;
-                let info = get_info(idcode)?;
+                let info = get_info(devices, &ret, idcode)?;
                 ret.push((idcode, info.clone()));
             }
 
@@ -137,7 +191,7 @@ idcode {code:08X} not found in device list
             }
 
             idcode => {
-                let info = get_info(idcode)?;
+                let info = get_info(devices, &ret, idcode)?;
                 ret.push((idcode, info.clone()));
             }
         }
