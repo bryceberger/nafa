@@ -2,7 +2,7 @@ use eyre::Result;
 use tracing::{debug, instrument};
 
 use crate::{
-    Backend, Buffer, SpaceHex,
+    Backend, Buffer,
     backend::Data,
     jtag,
     units::{Bits, Bytes},
@@ -199,7 +199,8 @@ impl Backend for Device {
 
                 let (tdi, last) = match (after, tdi.split_last()) {
                     (Some(_), Some((l, data))) => (data, Some(*l)),
-                    (None, _) | (Some(_), None) => (tdi, None),
+                    (None, _) => (tdi, None),
+                    (Some(_), None) => panic!("cannot have path after with zero length data"),
                 };
 
                 for chunk in tdi.chunks(MAX_READ_WRITE_LEN) {
@@ -312,7 +313,7 @@ impl Backend for Device {
         debug!(
             write_len = self.cmd_buf.len(),
             read_len = self.cmd_read_len,
-            data = %SpaceHex(&self.cmd_buf),
+            data = %crate::ShortHex(&self.cmd_buf),
         );
 
         let buf = buf.extend(self.cmd_read_len);

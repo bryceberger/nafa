@@ -4,7 +4,7 @@ use eyre::Result;
 use nusb::transfer::{self, ControlIn, ControlOut, ControlType, Recipient};
 use tracing::{info, instrument};
 
-use crate::{Backend, Buffer, Hex, SpaceHex, backend::Data, jtag, units::Bits};
+use crate::{Backend, Buffer, Hex, backend::Data, jtag, units::Bits};
 
 pub mod firmware;
 
@@ -408,11 +408,11 @@ impl Backend for Device {
         };
         let in_bits = (self.cmd_buf.len() - 2) / 2 * 4 + usize::from(self.num_bits);
         let in_bits = in_bits.try_into().unwrap();
-        info!(
+        tracing::debug!(
             in_bits,
             in_len = self.cmd_buf.len(),
             expect_read = self.cmd_read_len,
-            data = %SpaceHex(&self.cmd_buf),
+            data = %crate::ShortHex(&self.cmd_buf),
         );
         shift(&self.handle, 0xa6, in_bits, &self.cmd_buf, buf).await?;
 
