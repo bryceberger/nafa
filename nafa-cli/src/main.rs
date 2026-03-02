@@ -6,7 +6,9 @@ use std::{
 
 use clap::Parser;
 use color_eyre::Result;
-use nafa_io::{Backend, Controller, devices::DeviceInfo, jtag::IdCode, units::Bytes, xpc};
+use nafa_io::{
+    Backend, Controller, devices::DeviceInfo, jtag::IdCode, units::Bytes, usb_blaster, xpc,
+};
 use smol::future::FutureExt;
 
 use crate::cli_helpers::UsbAddr;
@@ -46,19 +48,20 @@ enum CliCommand {
         pretty: bool,
     },
     InfoXadc,
-    FlashXpc(FlashXpc),
+    Flash(Flash),
     Readback(Readback),
     Program(Program),
 }
 
 #[derive(clap::Args)]
-struct FlashXpc {
+struct Flash {
     firmware: Firmware,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum Firmware {
     XP2,
+    UsbBlasterII,
 }
 
 #[derive(clap::Args)]
@@ -79,7 +82,7 @@ fn main() -> Result<()> {
 
 async fn async_main(Args { global, command }: Args) -> Result<()> {
     // no controller
-    if let CliCommand::FlashXpc(flash) = command {
+    if let CliCommand::Flash(flash) = command {
         return flash_xpc(global.usb, flash).await;
     }
 
@@ -133,7 +136,7 @@ async fn run(
 ) -> Result<Option<Box<dyn FnOnce()>>> {
     match command {
         // no controller, handled earlier
-        CliCommand::FlashXpc(_) => unreachable!(),
+        CliCommand::Flash(_) => unreachable!(),
 
         // controller
         CliCommand::Info { pretty } => {
@@ -248,10 +251,11 @@ async fn get_device(addr: UsbAddr) -> Result<nusb::DeviceInfo> {
     Ok(device)
 }
 
-async fn flash_xpc(addr: UsbAddr, args: FlashXpc) -> Result<()> {
+async fn flash_xpc(addr: UsbAddr, args: Flash) -> Result<()> {
     let device = get_device(addr).await?.open().await?;
     let firmware = match args.firmware {
         Firmware::XP2 => xpc::firmware::XP2,
+        Firmware::UsbBlasterII => usb_blaster::firmware::BLASTER_6810,
     };
     xpc::flash(&device, firmware).await?;
     Ok(())
