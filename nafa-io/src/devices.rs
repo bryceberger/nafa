@@ -14,6 +14,7 @@ pub struct DeviceInfo {
 pub enum Specific {
     Unknown,
     Xilinx32(Xilinx32Info),
+    Intel,
 }
 
 #[derive(Clone, Debug)]
@@ -54,9 +55,9 @@ fn intel() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
 
     #[rustfmt::skip]
     static DEVICES: &[(IdCode, DeviceInfo)] = &[
-        (id(0x020D10DD), DeviceInfo { irlen: B(10), name: "vtap10",  specific: S::Unknown }),
-        (id(0x020F30DD), DeviceInfo { irlen: B(10), name: "10CL025", specific: S::Unknown }),
-        (id(0x031820DD), DeviceInfo { irlen: B(10), name: "10M08S",  specific: S::Unknown }),
+        (id(0x020D10DD), DeviceInfo { irlen: B(10), name: "vtap10",  specific: S::Intel }),
+        (id(0x020F30DD), DeviceInfo { irlen: B(10), name: "10CL025", specific: S::Intel }),
+        (id(0x031820DD), DeviceInfo { irlen: B(10), name: "10M08S",  specific: S::Intel }),
     ];
 
     DEVICES.iter().cloned()

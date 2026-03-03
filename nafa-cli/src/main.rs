@@ -158,9 +158,10 @@ async fn run(
             info_xadc(cont).await?;
         }
         CliCommand::Readback(args) => {
+            use nafa_io::devices::Specific as S;
             let data = match &cont.info().specific {
-                nafa_io::devices::Specific::Unknown => todo!(),
-                nafa_io::devices::Specific::Xilinx32(info) => {
+                S::Unknown | S::Intel => todo!(),
+                S::Xilinx32(info) => {
                     let len = info.readback.into();
                     if let Some(pb) = pb {
                         pb.set_length(Bytes::from(info.readback).0 as _)
@@ -313,11 +314,12 @@ async fn info(cont: &mut Controller<impl Backend>, pretty: bool) -> Result<()> {
 }
 
 async fn info_xadc<B: Backend>(cont: &mut Controller<B>) -> Result<()> {
+    use nafa_io::devices::Specific as S;
     use nafa_xilinx::_32bit::drp::{Addr, Cmd, Command};
 
     let family = match &cont.info().specific {
-        nafa_io::devices::Specific::Unknown => todo!(),
-        nafa_io::devices::Specific::Xilinx32(info) => info.family,
+        S::Xilinx32(info) => info.family,
+        _ => unreachable!(),
     };
 
     println!("idcode: {:04X}", cont.idcode().code());

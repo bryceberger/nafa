@@ -160,6 +160,7 @@ pub async fn detect_chain<B: Backend>(
     let sdr_to_idle = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
 
     let mut ret = Vec::new();
+    let mut must_be_last = false;
     loop {
         let rx = Data::Rx(Bytes((ret.len() + 1) * 4));
         backend.bytes(buf, idle_to_sdr, rx, sdr_to_idle).await?;
@@ -177,6 +178,10 @@ pub async fn detect_chain<B: Backend>(
             // reached end of chain
             0xffff_ffff => {
                 break;
+            }
+
+            _idcode if must_be_last => {
+                return Err(eyre!("device after intel 1-bit-tap special case"));
             }
 
             // special case for Zynq US+: add ARM_DAP to the chain
@@ -197,8 +202,14 @@ pub async fn detect_chain<B: Backend>(
 
             idcode => {
                 let idcode = IdCode::new(idcode);
-                let info = get_info(devices, &ret, idcode)?;
-                ret.push((idcode, info));
+                if let Some((extra, info)) = intel_special_case(devices, idcode) {
+                    ret.push(extra);
+                    ret.push(info);
+                    must_be_last = true;
+                } else {
+                    let info = get_info(devices, &ret, idcode)?;
+                    ret.push((idcode, info));
+                }
             }
         }
         buf.clear();
@@ -239,6 +250,25 @@ async fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) ->
         0xffff_ffff => Err(eyre!("end of chain after zynq us special case ???")),
         idcode if idcode & 1 != 1 => Err(eyre!("still in bypass after zynq us special case")),
         idcode => Ok(IdCode::new(idcode)),
+    }
+}
+
+fn intel_special_case(
+    devices: &HashMap<IdCode, DeviceInfo>,
+    idcode: IdCode,
+) -> Option<((IdCode, DeviceInfo), (IdCode, DeviceInfo))> {
+    use crate::devices::Specific as S;
+    let shifted = IdCode::new(idcode.code() >> 1);
+    let info = devices.get(&shifted)?;
+    if let S::Intel = info.specific {
+        let fake_tap = DeviceInfo {
+            irlen: Bits(1),
+            name: "1_BIT_TAP",
+            specific: S::Unknown,
+        };
+        Some(((IdCode::new(0x00000001), fake_tap), (shifted, info.clone())))
+    } else {
+        None
     }
 }
 
