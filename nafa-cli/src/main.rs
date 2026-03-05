@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use clap::Parser;
@@ -104,23 +104,15 @@ async fn async_main(Args { global, command }: Args) -> Result<()> {
         _ => false,
     };
     let action = if progress {
-        let notify = &AtomicUsize::new(0);
-        let done = &AtomicBool::new(false);
-        let pb = &setup_progress_bar();
-
-        let progress = async {
-            while !done.load(Ordering::Acquire) {
-                pb.set_position(notify.load(Ordering::Acquire) as _);
-                smol::future::yield_now().await;
-            }
-            unreachable!()
-        };
-        let runner = cont.with_notifications(notify, async |cont| {
-            let r = run(command, cont, Some(pb)).await;
-            done.store(true, Ordering::Release);
-            r
+        let notify = AtomicUsize::new(0);
+        let pb = setup_progress_bar();
+        let progress = smol::future::poll_fn(|_| {
+            pb.set_position(notify.load(Ordering::Acquire) as _);
+            std::task::Poll::Pending
         });
-        runner.race(progress).await?
+        cont.with_notifications(&notify, async |cont| run(command, cont, Some(&pb)).await)
+            .race(progress)
+            .await?
     } else {
         run(command, &mut cont, None).await?
     };
