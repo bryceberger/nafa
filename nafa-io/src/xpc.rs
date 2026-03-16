@@ -9,7 +9,7 @@ use crate::{Backend, Buffer, Hex, backend::Data, jtag, units::Bits};
 pub mod firmware;
 
 pub struct Device {
-    handle: nusb::Device,
+    iface: nusb::Interface,
     /// Data to transfer. 4 bits over the wire for every 2 bytes in buffer, with
     /// the following format:
     ///
@@ -98,20 +98,21 @@ pub async fn flash(dev: &nusb::Device, firmware: &[(u16, &[u8])]) -> Result<()> 
 
 impl Device {
     pub async fn new(h: nusb::Device) -> Result<Self> {
-        request_28(&h, 0x11).await?;
-        write_gpio(&h, XPC_PROG).await?;
+        let iface = h.claim_interface(0).await?;
+        request_28(&iface, 0x11).await?;
+        write_gpio(&iface, XPC_PROG).await?;
         info!(
-            firmware_version = %Hex(read_firmware_version(&h).await?),
-            cpld_version = %Hex(read_cpld_version(&h).await?),
+            firmware_version = %Hex(read_firmware_version(&iface).await?),
+            cpld_version = %Hex(read_cpld_version(&iface).await?),
         );
 
-        request_28(&h, 0x11).await?;
-        output_enable(&h, true).await?;
-        shift(&h, 0xa6, 2, &[0x00; 2], None).await?;
-        request_28(&h, 0x12).await?;
+        request_28(&iface, 0x11).await?;
+        output_enable(&iface, true).await?;
+        shift(&iface, 0xa6, 2, &[0x00; 2], None).await?;
+        request_28(&iface, 0x12).await?;
 
         Ok(Self {
-            handle: h,
+            iface,
             cmd_buf: Vec::new(),
             cmd_read_len: 0,
             num_bits: 0,
@@ -148,7 +149,7 @@ impl Device {
     }
 }
 
-async fn request_28(h: &nusb::Device, index: u16) -> Result<()> {
+async fn request_28(iface: &nusb::Interface, index: u16) -> Result<()> {
     let data = ControlOut {
         control_type: ControlType::Vendor,
         recipient: Recipient::Device,
@@ -157,11 +158,11 @@ async fn request_28(h: &nusb::Device, index: u16) -> Result<()> {
         index,
         data: &[],
     };
-    h.control_out(data, S).await?;
+    iface.control_out(data, S).await?;
     Ok(())
 }
 
-async fn write_gpio(h: &nusb::Device, bits: u16) -> Result<()> {
+async fn write_gpio(iface: &nusb::Interface, bits: u16) -> Result<()> {
     let data = ControlOut {
         control_type: ControlType::Vendor,
         recipient: Recipient::Device,
@@ -170,11 +171,11 @@ async fn write_gpio(h: &nusb::Device, bits: u16) -> Result<()> {
         index: bits,
         data: &[],
     };
-    h.control_out(data, S).await?;
+    iface.control_out(data, S).await?;
     Ok(())
 }
 
-async fn read_firmware_version(h: &nusb::Device) -> Result<u16> {
+async fn read_firmware_version(iface: &nusb::Interface) -> Result<u16> {
     let data = ControlIn {
         control_type: ControlType::Vendor,
         recipient: Recipient::Device,
@@ -183,11 +184,11 @@ async fn read_firmware_version(h: &nusb::Device) -> Result<u16> {
         index: 0x0000,
         length: std::mem::size_of::<u16>() as _,
     };
-    let buf = h.control_in(data, S).await?;
+    let buf = iface.control_in(data, S).await?;
     Ok(u16::from_le_bytes(buf.try_into().unwrap()))
 }
 
-async fn read_cpld_version(h: &nusb::Device) -> Result<u16> {
+async fn read_cpld_version(iface: &nusb::Interface) -> Result<u16> {
     let data = ControlIn {
         control_type: ControlType::Vendor,
         recipient: Recipient::Device,
@@ -196,11 +197,11 @@ async fn read_cpld_version(h: &nusb::Device) -> Result<u16> {
         index: 0x0001,
         length: std::mem::size_of::<u16>() as _,
     };
-    let buf = h.control_in(data, S).await?;
+    let buf = iface.control_in(data, S).await?;
     Ok(u16::from_le_bytes(buf.try_into().unwrap()))
 }
 
-async fn output_enable(h: &nusb::Device, enable: bool) -> Result<()> {
+async fn output_enable(iface: &nusb::Interface, enable: bool) -> Result<()> {
     let data = ControlOut {
         control_type: ControlType::Vendor,
         recipient: Recipient::Device,
@@ -209,12 +210,12 @@ async fn output_enable(h: &nusb::Device, enable: bool) -> Result<()> {
         index: 0,
         data: &[],
     };
-    h.control_out(data, S).await?;
+    iface.control_out(data, S).await?;
     Ok(())
 }
 
 async fn shift(
-    h: &nusb::Device,
+    iface: &nusb::Interface,
     reqno: u16,
     bits: u16,
     in_buf: &[u8],
@@ -230,9 +231,7 @@ async fn shift(
         index: bits,
         data: &[],
     };
-    h.control_out(data, S).await?;
-
-    let iface = h.claim_interface(0).await?;
+    iface.control_out(data, S).await?;
 
     let mut writer = iface
         .endpoint::<transfer::Bulk, transfer::Out>(0x02)?
@@ -414,7 +413,7 @@ impl Backend for Device {
             expect_read = self.cmd_read_len,
             data = %crate::ShortHex(&self.cmd_buf),
         );
-        shift(&self.handle, 0xa6, in_bits, &self.cmd_buf, buf).await?;
+        shift(&self.iface, 0xa6, in_bits, &self.cmd_buf, buf).await?;
 
         self.cmd_buf.clear();
         self.cmd_read_len = 0;
