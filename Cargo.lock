@@ -843,6 +843,7 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "nusb",
+ "smol",
  "strum",
  "tracing",
 ]
@@ -857,6 +858,7 @@ dependencies = [
  "facet-python",
  "nafa-io",
  "nestify",
+ "smol",
  "tracing",
 ]
 

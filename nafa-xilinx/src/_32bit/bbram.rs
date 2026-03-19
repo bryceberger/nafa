@@ -1,12 +1,85 @@
 use eyre::Result;
-use nafa_io::{Backend, Controller};
+use nafa_io::{
+    Backend, Command, Controller,
+    devices::{DeviceInfo, Xilinx32Info},
+    units::{Bits, Bytes},
+};
+
+use crate::_32bit::{commands, crc::Crc, shift_for_slr};
 
 pub async fn program_key(
     cont: &mut Controller<impl Backend>,
     keys: &[[u8; 32]],
     dpa: Option<Dpa>,
 ) -> Result<()> {
-    todo!()
+    assert_eq!(
+        usize::from(num_slr(cont.info())),
+        keys.len(),
+        "must give one key per slr in device"
+    );
+
+    let ctrl_word = ctrl_word(dpa, false);
+    eprintln!("ctrl: {ctrl_word:08X}");
+
+    cont.run([
+        Command::ir(shift_for_slr(0, commands::JPROGRAM)),
+        Command::ir(shift_for_slr(0, commands::ISC_NOOP)),
+    ])
+    .await?;
+    smol::Timer::after(std::time::Duration::from_millis(100)).await;
+
+    for (slr, key) in keys.iter().enumerate() {
+        let key_chunks: &[[u8; 4]] = key.as_chunks().0;
+        let slr = slr as u8;
+        let crc = crc(ctrl_word, key);
+        eprintln!(" crc: {crc:08X}");
+
+        let enable = shift_for_slr(slr, commands::ISC_ENABLE);
+        let program_key = shift_for_slr(slr, commands::XSC_PROGRAM_KEY);
+        let program = shift_for_slr(slr, commands::ISC_PROGRAM);
+        let read = shift_for_slr(slr, commands::XSC_READ_RSVD);
+
+        #[rustfmt::skip]
+        cont.run([
+            Command::combined_ir_dr_tx_bits(enable, 0x15, Bits(5)),
+            
+            Command::ir(program_key),
+            Command::dr_tx(&[0xff; 4]),
+            Command::idle(Bytes(2)),
+
+            Command::ir(program), Command::dr_tx(&ctrl_word.to_le_bytes()),
+            Command::ir(program), Command::dr_tx(&key_chunks[0]),
+            Command::ir(program), Command::dr_tx(&key_chunks[1]),
+            Command::ir(program), Command::dr_tx(&key_chunks[2]),
+            Command::ir(program), Command::dr_tx(&key_chunks[3]),
+            Command::ir(program), Command::dr_tx(&key_chunks[4]),
+            Command::ir(program), Command::dr_tx(&key_chunks[5]),
+            Command::ir(program), Command::dr_tx(&key_chunks[6]),
+            Command::ir(program), Command::dr_tx(&key_chunks[7]),
+            Command::ir(program), Command::dr_tx(&crc.to_le_bytes()),
+        ]).await?;
+
+        for _ in 0..10 {
+            let data = cont
+                .run([Command::ir(read), Command::dr_rx(Bytes(5))])
+                .await?;
+            let read =
+                u32::from_le_bytes(*data[0..4].as_array().unwrap()) >> 5 | u32::from(data[4]) << 27;
+            println!("{data:02X?} -> {read:08X}");
+        }
+    }
+
+    cont.run([Command::ir(shift_for_slr(0, commands::ISC_DISABLE)), Command::dr_tx(&[0xff; 4])])
+        .await?;
+
+    Ok(())
+}
+
+fn num_slr(info: &DeviceInfo) -> u8 {
+    match info.specific {
+        nafa_io::devices::Specific::Xilinx32(Xilinx32Info { slr, .. }) => slr,
+        _ => panic!("xilinx bbram programming called with non-xilinx active device"),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -19,4 +92,115 @@ pub enum DpaMode {
 pub struct Dpa {
     pub mode: DpaMode,
     pub count: u16,
+}
+
+fn ctrl_word(dpa: Option<Dpa>, key_obfuscated: bool) -> u32 {
+    const ENABLE: u32 = 2;
+    const DISABLE: u32 = 1;
+    fn shift(val: bool, amount: u32) -> u32 {
+        if val {
+            ENABLE << amount
+        } else {
+            DISABLE << amount
+        }
+    }
+
+    let mode = shift(dpa.is_some_and(|d| matches!(d.mode, DpaMode::All)), 12);
+    let enable = shift(dpa.is_some(), 14);
+    let count = {
+        // TODO: embeddedsw repo truncates this to 8 bits, then repeats? confusing
+        // https://github.com/Xilinx/embeddedsw/blob/1bb19ac1ab06ab322ba4340bed372f93ca612a18/lib/sw_services/xilskey/src/xilskey_bbram.c#L448
+        let count = dpa.map_or(1, |dpa| dpa.count) as u8 as u32;
+        count << 16 | count << 24
+    };
+    let reserved = 0x0440;
+    let black_key = shift(key_obfuscated, 8);
+    ecc(mode | enable | count | reserved | black_key)
+}
+
+fn ecc(data: u32) -> u32 {
+    const P0_MASK: u32 = 0x36AD555;
+    const P1_MASK: u32 = 0x2D9B333;
+    const P2_MASK: u32 = 0x1C78F0F;
+    const P3_MASK: u32 = 0x03F80FF;
+    const P4_MASK: u32 = 0x0007FFF;
+
+    fn row(mut data: u32, mut mask: u32) -> u32 {
+        let mut ret = 0;
+        for _ in 0..26 {
+            ret ^= (data & 1) & (mask & 1);
+            data >>= 1;
+            mask >>= 1;
+        }
+        ret
+    }
+
+    let p0 = row(data >> 6, P0_MASK);
+    let p1 = row(data >> 6, P1_MASK);
+    let p2 = row(data >> 6, P2_MASK);
+    let p3 = row(data >> 6, P3_MASK);
+    let p4 = row(data >> 6, P4_MASK);
+    let p5 = {
+        let mut value = data >> 6;
+        let mut ret = p0 ^ p1 ^ p2 ^ p3 ^ p4;
+        for _ in 0..26 {
+            ret ^= value & 1;
+            value >>= 1;
+        }
+        ret
+    };
+
+    data & 0xFFFF_FFC0 | p5 | p4 << 1 | p3 << 2 | p2 << 3 | p1 << 4 | p0 << 5
+}
+
+fn crc(ctrl: u32, key: &[u8; 32]) -> u32 {
+    let (key, []) = key.as_chunks() else {
+        unreachable!()
+    };
+    let mut crc = Crc::new(0);
+    crc.update(9, ctrl);
+    for (idx, chunk) in key.iter().enumerate().rev() {
+        crc.update((idx as u8) + 1, u32::from_be_bytes(*chunk));
+    }
+    crc.value()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bbram_crc() {
+        let ctrl = 0x0101555c;
+        let key = &[
+            0x34, 0x9d, 0xe4, 0x57, 0x1a, 0xe6, 0xd8, 0x8d, 0xe2, 0x3d, 0xe6, 0x54, 0x89, 0xac,
+            0xf6, 0x70, 0x00, 0xff, 0x5e, 0xc9, 0x01, 0xae, 0x3d, 0x40, 0x9a, 0xab, 0xbc, 0xe4,
+            0x54, 0x98, 0x12, 0xdd,
+        ];
+        let expected = 0x96cb761d;
+        assert_eq!(crc(ctrl, key), expected);
+    }
+
+    #[test]
+    fn test_bbram_ecc() {
+        let ctrl_word = 0x01015540;
+        assert_eq!(ecc(ctrl_word), 0x0101555c);
+
+        let ctrl_word = super::ctrl_word(None, false);
+        assert_eq!(ctrl_word, 0x0101555c);
+
+        let dpa = Dpa {
+            mode: DpaMode::Invalid,
+            count: 6,
+        };
+        let ctrl_word = super::ctrl_word(Some(dpa), false);
+        assert_eq!(ctrl_word, 0x06069542);
+
+        let dpa = Dpa {
+            mode: DpaMode::All,
+            count: 24,
+        };
+        let ctrl_word = super::ctrl_word(Some(dpa), false);
+        assert_eq!(ctrl_word, 0x1818a556);
+    }
 }
