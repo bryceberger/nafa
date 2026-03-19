@@ -5,6 +5,9 @@ license.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "decode_ftdi"
+
 [dependencies]
 async-trait = "0.1.89"
 color-eyre.workspace = true
