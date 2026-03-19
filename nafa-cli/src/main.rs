@@ -49,6 +49,7 @@ enum CliCommand {
         pretty: bool,
     },
     InfoXadc,
+    ProgramBbramKey,
     Flash(Flash),
     Readback(Readback),
     Program(Program),
@@ -142,6 +143,13 @@ async fn run(
         // no controller, handled earlier
         CliCommand::Flash(_) | CliCommand::DetectChain => unreachable!(),
 
+        // TODO: take in from cli / file
+        CliCommand::ProgramBbramKey => {
+            use nafa_xilinx::_32bit::bbram;
+            let key = &[[0xff; 32]];
+            let dpa = None;
+            bbram::program_key(cont, key, dpa).await?;
+        }
         // controller
         CliCommand::Info { pretty } => {
             info(cont, pretty).await?;

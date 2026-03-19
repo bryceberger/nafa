@@ -9,6 +9,7 @@ use nafa_io::{
 
 use self::registers::{Addr, Type1};
 
+pub mod bbram;
 pub mod commands;
 mod crc;
 pub mod drp;
