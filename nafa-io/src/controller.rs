@@ -357,13 +357,19 @@ impl<B: Backend> Controller<B> {
 
         let irlen_before: Bits<u8> = Bits(before.iter().map(|i| i.1.irlen.0).sum());
         let irlen_after: Bits<u8> = Bits(after.iter().map(|i| i.1.irlen.0).sum());
+        let irlen = ChainInfo {
+            before: irlen_before,
+            after: irlen_after,
+        };
 
         let devices_before = before.len();
         let devices_after = after.len();
         assert!(devices_before <= 32);
         assert!(devices_after <= 32);
-        let devices_before = devices_before as u8;
-        let devices_after = devices_after as u8;
+        let devices = ChainInfo {
+            before: devices_before as _,
+            after: devices_after as _,
+        };
 
         let mut last_noisy = false;
         for command in commands {
@@ -374,16 +380,34 @@ impl<B: Backend> Controller<B> {
             };
             match command.inner {
                 CommandInner::IrTxBits { tdi } => {
-                    io_bits(backend, buf, info, irlen_before, irlen_after, tdi).await?
+                    let data = BitTx {
+                        tdi,
+                        len: info.irlen,
+                    };
+                    io_bits_ir(backend, buf, irlen, data).await?
                 }
                 CommandInner::DrTx { tdi } => {
-                    io_bytes(backend, buf, devices_before, devices_after, Data::Tx(tdi)).await?
+                    io_bytes(backend, buf, devices, Data::Tx(tdi)).await?
                 }
                 CommandInner::DrRx { len } => {
-                    io_bytes(backend, buf, devices_before, devices_after, Data::Rx(len)).await?
+                    io_bytes(backend, buf, devices, Data::Rx(len)).await?
                 }
                 CommandInner::DrTxRx { tdi } => {
-                    io_bytes(backend, buf, devices_before, devices_after, Data::TxRx(tdi)).await?
+                    io_bytes(backend, buf, devices, Data::TxRx(tdi)).await?
+                }
+                CommandInner::DrTxBits { tdi, len } => {
+                    io_bits_dr(backend, buf, devices, BitTx { tdi, len }).await?;
+                }
+                CommandInner::CombinedIrDrTxBits { ir, dr, dr_len } => {
+                    let ir = BitTx {
+                        tdi: ir,
+                        len: info.irlen,
+                    };
+                    let dr = BitTx {
+                        tdi: dr,
+                        len: dr_len,
+                    };
+                    io_bits_ir_dr(backend, buf, irlen, devices, ir, dr).await?
                 }
                 CommandInner::Idle { len } => {
                     backend
@@ -398,39 +422,130 @@ impl<B: Backend> Controller<B> {
             _ => buf,
         };
 
-        backend.tms(buf, Path::IDLE).await?;
         backend.flush(buf).await?;
         Ok(&self.buf)
     }
 }
 
-async fn io_bits<B: Backend>(
+#[derive(Clone, Copy)]
+struct ChainInfo<T> {
+    before: T,
+    after: T,
+}
+
+#[derive(Clone, Copy)]
+struct BitTx {
+    tdi: u32,
+    len: Bits<u8>,
+}
+
+async fn io_bits_ir<B: Backend>(
     backend: &mut B,
     buf: &mut dyn Buffer,
-    info: &DeviceInfo,
-    irlen_before: Bits<u8>,
-    irlen_after: Bits<u8>,
-    tdi: u32,
+    irlen: ChainInfo<Bits<u8>>,
+    ir: BitTx,
 ) -> Result<()> {
     let ir0 = Some(PATHS[State::RunTestIdle][State::ShiftIR]);
     let ir1 = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
 
-    match (irlen_before, irlen_after) {
+    match (irlen.before, irlen.after) {
         (Bits(0), Bits(0)) => {
-            backend.bits(buf, ir0, tdi, info.irlen, ir1).await?;
+            backend.bits(buf, ir0, ir.tdi, ir.len, ir1).await?;
         }
         (pre, Bits(0)) => {
             backend.bits(buf, ir0, u32::MAX, pre, None).await?;
-            backend.bits(buf, None, tdi, info.irlen, ir1).await?;
+            backend.bits(buf, None, ir.tdi, ir.len, ir1).await?;
         }
         (Bits(0), post) => {
-            backend.bits(buf, ir0, tdi, info.irlen, None).await?;
+            backend.bits(buf, ir0, ir.tdi, ir.len, None).await?;
             backend.bits(buf, None, u32::MAX, post, ir1).await?;
         }
         (pre, post) => {
             backend.bits(buf, ir0, u32::MAX, pre, None).await?;
-            backend.bits(buf, None, tdi, info.irlen, None).await?;
+            backend.bits(buf, None, ir.tdi, ir.len, None).await?;
             backend.bits(buf, None, u32::MAX, post, ir1).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn io_bits_dr(
+    backend: &mut impl Backend,
+    buf: &mut dyn Buffer,
+    devices: ChainInfo<u8>,
+    dr: BitTx,
+) -> Result<()> {
+    let dr0 = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
+    let dr1 = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
+
+    match (devices.before, devices.after) {
+        (0, 0) => {
+            backend.bits(buf, dr0, dr.tdi, dr.len, dr1).await?;
+        }
+        (pre, 0) => {
+            backend.bits(buf, dr0, u32::MAX, Bits(pre), None).await?;
+            backend.bits(buf, None, dr.tdi, dr.len, dr1).await?;
+        }
+        (0, post) => {
+            backend.bits(buf, dr0, dr.tdi, dr.len, None).await?;
+            backend.bits(buf, None, u32::MAX, Bits(post), dr1).await?;
+        }
+        (pre, post) => {
+            backend.bits(buf, dr0, u32::MAX, Bits(pre), None).await?;
+            backend.bits(buf, None, dr.tdi, dr.len, None).await?;
+            backend.bits(buf, None, u32::MAX, Bits(post), dr1).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn io_bits_ir_dr(
+    backend: &mut impl Backend,
+    buf: &mut dyn Buffer,
+    irlen: ChainInfo<Bits<u8>>,
+    devices: ChainInfo<u8>,
+    ir: BitTx,
+    dr: BitTx,
+) -> Result<()> {
+    let ir0 = Some(PATHS[State::RunTestIdle][State::ShiftIR]);
+    let ir1 = Some(PATHS[State::ShiftIR][State::PauseIR]);
+    let dr0 = Some(PATHS[State::PauseIR][State::ShiftDR]);
+    let dr1 = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
+
+    match (irlen.before, irlen.after) {
+        (Bits(0), Bits(0)) => {
+            backend.bits(buf, ir0, ir.tdi, ir.len, ir1).await?;
+        }
+        (pre, Bits(0)) => {
+            backend.bits(buf, ir0, u32::MAX, pre, None).await?;
+            backend.bits(buf, None, ir.tdi, ir.len, ir1).await?;
+        }
+        (Bits(0), post) => {
+            backend.bits(buf, ir0, ir.tdi, ir.len, None).await?;
+            backend.bits(buf, None, u32::MAX, post, ir1).await?;
+        }
+        (pre, post) => {
+            backend.bits(buf, ir0, u32::MAX, pre, None).await?;
+            backend.bits(buf, None, ir.tdi, ir.len, None).await?;
+            backend.bits(buf, None, u32::MAX, post, ir1).await?;
+        }
+    }
+    match (devices.before, devices.after) {
+        (0, 0) => {
+            backend.bits(buf, dr0, dr.tdi, dr.len, dr1).await?;
+        }
+        (pre, 0) => {
+            backend.bits(buf, dr0, u32::MAX, Bits(pre), None).await?;
+            backend.bits(buf, None, dr.tdi, dr.len, dr1).await?;
+        }
+        (0, post) => {
+            backend.bits(buf, dr0, dr.tdi, dr.len, None).await?;
+            backend.bits(buf, None, u32::MAX, Bits(post), dr1).await?;
+        }
+        (pre, post) => {
+            backend.bits(buf, dr0, u32::MAX, Bits(pre), None).await?;
+            backend.bits(buf, None, dr.tdi, dr.len, None).await?;
+            backend.bits(buf, None, u32::MAX, Bits(post), dr1).await?;
         }
     }
     Ok(())
@@ -439,14 +554,13 @@ async fn io_bits<B: Backend>(
 async fn io_bytes<B: Backend>(
     backend: &mut B,
     buf: &mut dyn Buffer,
-    devices_before: u8,
-    devices_after: u8,
+    devices: ChainInfo<u8>,
     data: Data<'_>,
 ) -> Result<()> {
     let dr0 = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
     let dr1 = Some(PATHS[State::ShiftDR][State::RunTestIdle]);
 
-    match (devices_before, devices_after) {
+    match (devices.before, devices.after) {
         (0, 0) => {
             backend.bytes(buf, dr0, data, dr1).await?;
         }
@@ -497,6 +611,9 @@ enum CommandInner<'d> {
     DrTx { tdi: &'d [u8] },
     DrRx { len: Bytes<usize> },
     DrTxRx { tdi: &'d [u8] },
+    DrTxBits { tdi: u32, len: Bits<u8> },
+
+    CombinedIrDrTxBits { ir: u32, dr: u32, dr_len: Bits<u8> },
 
     Idle { len: Bytes<usize> },
 }
@@ -541,6 +658,18 @@ impl<'d> Command<'d> {
     pub fn dr_txrx_with_notification(tdi: &'d [u8]) -> Self {
         let inner = CommandInner::DrTxRx { tdi };
         let notify = true;
+        Self { notify, inner }
+    }
+
+    pub fn dr_tx_bits(tdi: u32, len: Bits<u8>) -> Self {
+        let inner = CommandInner::DrTxBits { tdi, len };
+        let notify = false;
+        Self { notify, inner }
+    }
+
+    pub fn combined_ir_dr_tx_bits(ir: u32, dr: u32, dr_len: Bits<u8>) -> Self {
+        let inner = CommandInner::CombinedIrDrTxBits { ir, dr, dr_len };
+        let notify = false;
         Self { notify, inner }
     }
 
