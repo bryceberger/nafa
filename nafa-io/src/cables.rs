@@ -56,67 +56,67 @@ const fn c(vid: u16, pid: u16, name: &'static str, init: InitFn) -> Cable {
 
 pub const KNOWN: &[Cable] = &[
     c(0x0403, 0xcff8, "amontec", |device| {
-        init_ftdi(device, &ftdi::devices::AMONTEC, 1500000)
+        init_ftdi(device, &ftdi::devices::AMONTEC, 1_500_000)
     }),
     c(0x15ba, 0x002b, "arm-usb-ocd-h", |device| {
-        init_ftdi(device, &ftdi::devices::ARM_USB_OCD_H, 1500000)
+        init_ftdi(device, &ftdi::devices::ARM_USB_OCD_H, 1_500_000)
     }),
     c(0x0403, 0x6010, "bbv2", |device| {
-        init_ftdi(device, &ftdi::devices::BBV2, 1500000)
+        init_ftdi(device, &ftdi::devices::BBV2, 1_500_000)
     }),
     c(0x0403, 0x6010, "bbv2_2", |device| {
-        init_ftdi(device, &ftdi::devices::BBV2_2, 1500000)
+        init_ftdi(device, &ftdi::devices::BBV2_2, 1_500_000)
     }),
     c(0x0403, 0x8350, "cm1", |device| {
-        init_ftdi(device, &ftdi::devices::CM1, 1500000)
+        init_ftdi(device, &ftdi::devices::CM1, 1_500_000)
     }),
     c(0x0403, 0x6010, "dlp2232h", |device| {
-        init_ftdi(device, &ftdi::devices::DLP2232H, 1500000)
+        init_ftdi(device, &ftdi::devices::DLP2232H, 1_500_000)
     }),
     c(0x0403, 0x6010, "ft2232test", |device| {
-        init_ftdi(device, &ftdi::devices::FT2232TEST, 8000000)
+        init_ftdi(device, &ftdi::devices::FT2232TEST, 8_000_000)
     }),
     c(0x0403, 0x6011, "ft4232h", |device| {
-        init_ftdi(device, &ftdi::devices::FT4232H, 1500000)
+        init_ftdi(device, &ftdi::devices::FT4232H, 1_500_000)
     }),
     c(0x0403, 0x6010, "ftdijtag", |device| {
-        init_ftdi(device, &ftdi::devices::FTDIJTAG, 1500000)
+        init_ftdi(device, &ftdi::devices::FTDIJTAG, 1_500_000)
     }),
     c(0x0403, 0x6010, "ikda", |device| {
-        init_ftdi(device, &ftdi::devices::IKDA, 1500000)
+        init_ftdi(device, &ftdi::devices::IKDA, 1_500_000)
     }),
     c(0x0403, 0x6014, "jtaghs2", |device| {
-        init_ftdi(device, &ftdi::devices::JTAGHS2, 15000000)
+        init_ftdi(device, &ftdi::devices::JTAGHS2, 15_000_000)
     }),
     c(0x0403, 0x6010, "l_motctl", |device| {
-        init_ftdi(device, &ftdi::devices::L_MOTCTL, 8000000)
+        init_ftdi(device, &ftdi::devices::L_MOTCTL, 8_000_000)
     }),
     c(0x0403, 0x6010, "llbbc", |device| {
-        init_ftdi(device, &ftdi::devices::LLBBC, 8000000)
+        init_ftdi(device, &ftdi::devices::LLBBC, 8_000_000)
     }),
     c(0x0403, 0x6010, "llbus", |device| {
-        init_ftdi(device, &ftdi::devices::LLBUS, 1500000)
+        init_ftdi(device, &ftdi::devices::LLBUS, 1_500_000)
     }),
     c(0x0403, 0x6010, "llif", |device| {
-        init_ftdi(device, &ftdi::devices::LLIF, 8000000)
+        init_ftdi(device, &ftdi::devices::LLIF, 8_000_000)
     }),
     c(0x2A19, 0x1009, "mimas_a7", |device| {
-        init_ftdi(device, &ftdi::devices::MIMAS_A7, 15000000)
+        init_ftdi(device, &ftdi::devices::MIMAS_A7, 15_000_000)
     }),
     c(0x0403, 0x6010, "nexys4", |device| {
-        init_ftdi(device, &ftdi::devices::NEXYS4, 30000000)
+        init_ftdi(device, &ftdi::devices::NEXYS4, 30_000_000)
     }),
     c(0x15b1, 0x0003, "olimex", |device| {
-        init_ftdi(device, &ftdi::devices::OLIMEX, 1500000)
+        init_ftdi(device, &ftdi::devices::OLIMEX, 1_500_000)
     }),
     c(0x9e88, 0x9e8f, "plugjtag", |device| {
-        init_ftdi(device, &ftdi::devices::PLUGJTAG, 1500000)
+        init_ftdi(device, &ftdi::devices::PLUGJTAG, 1_500_000)
     }),
     c(0x0403, 0x8a98, "tumpa", |device| {
-        init_ftdi(device, &ftdi::devices::TUMPA, 1500000)
+        init_ftdi(device, &ftdi::devices::TUMPA, 1_500_000)
     }),
     c(0x0403, 0xbdc8, "turtelizer", |device| {
-        init_ftdi(device, &ftdi::devices::TURTELIZER, 1500000)
+        init_ftdi(device, &ftdi::devices::TURTELIZER, 1_500_000)
     }),
     c(0x03fd, 0x0008, "xpc", |device| {
         Box::pin(async { Ok(Box::new(xpc::Device::new(device).await?) as BoxedBackend) })
