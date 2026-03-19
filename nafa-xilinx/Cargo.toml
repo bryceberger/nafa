@@ -15,4 +15,5 @@ facet.workspace = true
 facet-python.workspace = true
 nafa-io.path = "../nafa-io"
 nestify = "0.3.3"
+smol.workspace = true
 tracing.workspace = true

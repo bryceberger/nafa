@@ -11,6 +11,11 @@ impl Display for Hex<u16> {
         write!(f, "{:04X}", self.0)
     }
 }
+impl Display for Hex<u32> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:08X}", self.0)
+    }
+}
 
 const MAX_DISPLAY: usize = 64;
 

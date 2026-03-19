@@ -19,7 +19,6 @@ pub mod registers;
 fn shift_for_slr(active_slr: u8, inst: u8) -> u32 {
     assert!(active_slr <= 4);
     const NOOPS: u32 = 0b_100100_100100_100100_100100_100100;
-    // const NOOPS: u32 = u32::MAX;
     let inst = u32::from(inst & 0b111111);
     NOOPS & !(0b111111 << (active_slr * 6)) | inst << (active_slr * 6)
 }
