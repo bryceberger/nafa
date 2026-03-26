@@ -27,3 +27,17 @@ impl Display for UsbAddr {
         write!(f, "{:04X}:{:04X}", self.vid, self.pid)
     }
 }
+
+#[repr(transparent)]
+#[derive(Clone)]
+pub struct Hex<const N: usize>(pub [u8; N]);
+
+impl<const N: usize> FromStr for Hex<N> {
+    type Err = hex::FromHexError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut ret = [0; N];
+        hex::decode_to_slice(s, &mut ret)?;
+        Ok(Self(ret))
+    }
+}

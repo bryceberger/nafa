@@ -14,6 +14,7 @@ pub mod commands;
 mod crc;
 pub mod drp;
 pub mod info;
+pub mod nky;
 pub mod registers;
 
 fn shift_for_slr(active_slr: u8, inst: u8) -> u32 {

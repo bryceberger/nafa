@@ -10,13 +10,14 @@ clap = { version = "4.5.50", features = ["derive"] }
 color-eyre.workspace = true
 eyre.workspace = true
 facet-json.workspace = true
+facet-pretty.workspace = true
 facet.workspace = true
+hex.workspace = true
 indicatif = "0.18.2"
-nafa-io.path = "../nafa-io"
-nafa-xilinx.path = "../nafa-xilinx"
+nafa-io.workspace = true
+nafa-xilinx.workspace = true
 nusb.workspace = true
 smol.workspace = true
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing.workspace = true
-facet-pretty.workspace = true

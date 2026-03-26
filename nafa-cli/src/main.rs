@@ -49,10 +49,10 @@ enum CliCommand {
         pretty: bool,
     },
     InfoXadc,
-    ProgramBbramKey,
     Flash(Flash),
     Readback(Readback),
     Program(Program),
+    ProgramBbramKey(ProgramBbramKey),
 }
 
 #[derive(clap::Args)]
@@ -74,6 +74,14 @@ struct Readback {
 #[derive(clap::Args)]
 struct Program {
     input_file: PathBuf,
+}
+
+#[derive(clap::Args)]
+struct ProgramBbramKey {
+    #[arg(short, long)]
+    key: Vec<cli_helpers::Hex<32>>,
+    #[arg(long, conflicts_with("key"))]
+    nky: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -143,12 +151,8 @@ async fn run(
         // no controller, handled earlier
         CliCommand::Flash(_) | CliCommand::DetectChain => unreachable!(),
 
-        // TODO: take in from cli / file
-        CliCommand::ProgramBbramKey => {
-            use nafa_xilinx::_32bit::bbram;
-            let key = &[[0xff; 32]];
-            let dpa = None;
-            bbram::program_key(cont, key, dpa).await?;
+        CliCommand::ProgramBbramKey(opts) => {
+            program_bbram(cont, opts).await?;
         }
         // controller
         CliCommand::Info { pretty } => {
@@ -196,6 +200,34 @@ async fn run(
     }
 
     Ok(None)
+}
+
+async fn program_bbram(
+    cont: &mut Controller<Box<dyn Backend + 'static>>,
+    opts: ProgramBbramKey,
+) -> Result<(), eyre::Error> {
+    use nafa_io::devices::{Specific, Xilinx32Info};
+    use nafa_xilinx::_32bit::{bbram, nky};
+    let num_slr = match cont.info().specific {
+        Specific::Xilinx32(Xilinx32Info { slr, .. }) => slr,
+        _ => return Err(eyre::eyre!("can only program bbram for xilinx device")),
+    };
+    let keys = if let Some(path) = opts.nky {
+        nky::Nky::parse(&smol::fs::read_to_string(path).await?)?.keys
+    } else {
+        opts.key.into_iter().map(|x| x.0).collect()
+    };
+    if usize::from(num_slr) != keys.len() {
+        return Err(eyre::eyre!(
+            "device requires {} keys, {} provided",
+            num_slr,
+            keys.len()
+        ));
+    }
+    // TODO: take in from cli
+    let dpa = None;
+    bbram::program_key(cont, &keys, dpa).await?;
+    Ok(())
 }
 
 fn get_device_map() -> HashMap<IdCode, DeviceInfo> {
