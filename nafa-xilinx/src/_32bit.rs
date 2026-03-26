@@ -10,6 +10,7 @@ use nafa_io::{
 use self::registers::{Addr, Type1};
 
 pub mod commands;
+mod crc;
 pub mod drp;
 pub mod info;
 pub mod registers;
