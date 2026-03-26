@@ -1,4 +1,3 @@
-use facet::Facet;
 use nafa_io::devices::Xilinx32Family;
 use nafa_xilinx::{
     _32bit::info::{S7, UP, US},
