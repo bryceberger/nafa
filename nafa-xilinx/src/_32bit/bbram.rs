@@ -120,7 +120,7 @@ const fn swap_endian(x: [u8; 4]) -> [u8; 4] {
     u32::from_be_bytes(x).to_le_bytes()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, clap::ValueEnum)]
 pub enum DpaMode {
     /// Normal operation. Decrement DPA counter upon failing to configure.
     Invalid,
@@ -129,10 +129,21 @@ pub enum DpaMode {
     All,
 }
 
-#[derive(Clone, Copy)]
+// Derive weirdness: `#[command(flatten)]` on an `Option<T>` will mark `T`'s
+// fields as required. This gets around that: if any field is present, all
+// fields are required. If no fields are present, none are required (and the
+// option is `None`).
+// See clap issue 5092
+#[derive(Clone, Copy, clap::Args)]
+#[group(requires_all = ["mode", "count"])]
 pub struct Dpa {
+    #[arg(long = "dpa-mode", required = false)]
     pub mode: DpaMode,
-    pub count: u16,
+    /// Value to initialize the DPA counter to.
+    ///
+    /// After the counter reaches 0, the BBRAM key is cleared.
+    #[arg(long = "dpa-count", required = false)]
+    pub count: u8,
 }
 
 fn ctrl_word(dpa: Option<Dpa>, key_obfuscated: bool) -> u32 {
@@ -149,9 +160,7 @@ fn ctrl_word(dpa: Option<Dpa>, key_obfuscated: bool) -> u32 {
     let mode = shift(dpa.is_some_and(|d| matches!(d.mode, DpaMode::All)), 12);
     let enable = shift(dpa.is_some(), 14);
     let count = {
-        // TODO: embeddedsw repo truncates this to 8 bits, then repeats? confusing
-        // https://github.com/Xilinx/embeddedsw/blob/1bb19ac1ab06ab322ba4340bed372f93ca612a18/lib/sw_services/xilskey/src/xilskey_bbram.c#L448
-        let count = dpa.map_or(1, |dpa| dpa.count) as u8 as u32;
+        let count = dpa.map_or(1, |dpa| dpa.count as u32);
         count << 16 | count << 24
     };
     let reserved = 0x0440;

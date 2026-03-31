@@ -24,6 +24,7 @@ struct Args {
 }
 
 #[derive(clap::Args)]
+#[command(next_help_heading = "Global Options")]
 struct GlobalOpts {
     #[arg(
         long,
@@ -78,9 +79,21 @@ struct Program {
 
 #[derive(clap::Args)]
 struct ProgramBbramKey {
-    #[arg(short, long)]
-    key: Vec<cli_helpers::Hex<32>>,
-    #[arg(long, conflicts_with("key"))]
+    #[command(flatten)]
+    key_source: BbramKeySource,
+    #[command(flatten)]
+    dpa: Option<nafa_xilinx::_32bit::bbram::Dpa>,
+}
+
+#[derive(clap::Args)]
+#[group(required = true, multiple = false)]
+struct BbramKeySource {
+    /// 32-byte hexadecimal value. Can be repeated for devices with multiple
+    /// SLRs.
+    #[arg(long)]
+    key: Option<Vec<cli_helpers::Hex<32>>>,
+    /// `.nky` file as used by Vivado.
+    #[arg(long)]
     nky: Option<PathBuf>,
 }
 
@@ -212,10 +225,11 @@ async fn program_bbram(
         Specific::Xilinx32(Xilinx32Info { slr, .. }) => slr,
         _ => return Err(eyre::eyre!("can only program bbram for xilinx device")),
     };
-    let keys = if let Some(path) = opts.nky {
+    let keys = if let Some(path) = opts.key_source.nky {
         nky::Nky::parse(&smol::fs::read_to_string(path).await?)?.keys
     } else {
-        opts.key.into_iter().map(|x| x.0).collect()
+        let keys = opts.key_source.key.expect("clap validated");
+        keys.into_iter().map(|x| x.0).collect()
     };
     if usize::from(num_slr) != keys.len() {
         return Err(eyre::eyre!(
@@ -224,9 +238,7 @@ async fn program_bbram(
             keys.len()
         ));
     }
-    // TODO: take in from cli
-    let dpa = None;
-    bbram::program_key(cont, &keys, dpa).await?;
+    bbram::program_key(cont, &keys, opts.dpa).await?;
     Ok(())
 }
 

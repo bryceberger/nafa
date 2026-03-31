@@ -860,6 +860,7 @@ name = "nafa-xilinx"
 version = "0.0.1"
 dependencies = [
  "bitflags",
+ "clap",
  "eyre",
  "facet",
  "facet-python",
