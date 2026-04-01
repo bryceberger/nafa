@@ -31,8 +31,8 @@ impl<T> Clone for Ptr<T> {
 }
 impl<T> Copy for Ptr<T> {}
 
-pub struct Controller<B> {
-    backend: B,
+pub struct Controller {
+    backend: Box<dyn Backend>,
     before: Vec<(IdCode, DeviceInfo)>,
     active: (IdCode, DeviceInfo),
     after: Vec<(IdCode, DeviceInfo)>,
@@ -136,8 +136,8 @@ fn get_info(
 }
 
 #[tracing::instrument(skip_all)]
-pub async fn detect_chain<B: Backend>(
-    backend: &mut B,
+pub async fn detect_chain(
+    backend: &mut dyn Backend,
     devices: &HashMap<IdCode, DeviceInfo>,
 ) -> Result<Vec<(IdCode, DeviceInfo)>> {
     let buf = &mut Vec::new();
@@ -219,7 +219,7 @@ pub async fn detect_chain<B: Backend>(
 }
 
 #[tracing::instrument(skip_all)]
-async fn zynq_us_init_arm_dap<B: Backend>(backend: &mut B, buf: &mut Vec<u8>) -> Result<IdCode> {
+async fn zynq_us_init_arm_dap(backend: &mut dyn Backend, buf: &mut Vec<u8>) -> Result<IdCode> {
     let reset_to_sir = Some(PATHS[State::TestLogicReset][State::ShiftIR]);
     let sir_to_idle = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
     let idle_to_sdr = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
@@ -272,10 +272,10 @@ fn intel_special_case(
     }
 }
 
-impl<B: Backend> Controller<B> {
+impl Controller {
     #[tracing::instrument(skip_all)]
     pub async fn new(
-        mut backend: B,
+        mut backend: Box<dyn Backend>,
         before: Vec<(IdCode, DeviceInfo)>,
         active: (IdCode, DeviceInfo),
         after: Vec<(IdCode, DeviceInfo)>,
@@ -439,8 +439,8 @@ struct BitTx {
     len: Bits<u8>,
 }
 
-async fn io_bits_ir<B: Backend>(
-    backend: &mut B,
+async fn io_bits_ir(
+    backend: &mut dyn Backend,
     buf: &mut dyn Buffer,
     irlen: ChainInfo<Bits<u8>>,
     ir: BitTx,
@@ -470,7 +470,7 @@ async fn io_bits_ir<B: Backend>(
 }
 
 async fn io_bits_dr(
-    backend: &mut impl Backend,
+    backend: &mut dyn Backend,
     buf: &mut dyn Buffer,
     devices: ChainInfo<u8>,
     dr: BitTx,
@@ -500,7 +500,7 @@ async fn io_bits_dr(
 }
 
 async fn io_bits_ir_dr(
-    backend: &mut impl Backend,
+    backend: &mut dyn Backend,
     buf: &mut dyn Buffer,
     irlen: ChainInfo<Bits<u8>>,
     devices: ChainInfo<u8>,
@@ -551,8 +551,8 @@ async fn io_bits_ir_dr(
     Ok(())
 }
 
-async fn io_bytes<B: Backend>(
-    backend: &mut B,
+async fn io_bytes(
+    backend: &mut dyn Backend,
     buf: &mut dyn Buffer,
     devices: ChainInfo<u8>,
     data: Data<'_>,

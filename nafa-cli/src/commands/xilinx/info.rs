@@ -1,4 +1,4 @@
-use nafa_io::{Backend, Controller};
+use nafa_io::Controller;
 use nafa_xilinx::read;
 
 #[derive(clap::Args)]
@@ -7,7 +7,7 @@ pub struct Args {
     pub pretty: bool,
 }
 
-pub async fn run(cont: &mut Controller<Box<dyn Backend>>, args: Args) -> Result<(), eyre::Error> {
+pub async fn run(cont: &mut Controller, args: Args) -> Result<(), eyre::Error> {
     use facet_pretty::FacetPretty;
 
     fn print<'a, F: facet::Facet<'a>>(info: F, pretty: bool) -> Result<(), eyre::Error> {

@@ -2,8 +2,7 @@ use std::time::{Duration, Instant};
 
 use bitflags::bitflags;
 use eyre::Result;
-use nafa_io::{
-    Backend, Command, Controller,
+use nafa_io::{Command, Controller,
     units::{Bytes, Words32},
 };
 
@@ -25,7 +24,7 @@ fn shift_for_slr(active_slr: u8, inst: u8) -> u32 {
 }
 
 pub async fn read_device_register(
-    cont: &mut Controller<impl Backend>,
+    cont: &mut Controller,
     active_slr: u8,
     reg: Type1,
 ) -> Result<&[u8]> {
@@ -43,7 +42,7 @@ pub async fn read_device_register(
 }
 
 async fn read_device_register_word(
-    cont: &mut Controller<impl Backend>,
+    cont: &mut Controller,
     active_slr: u8,
     addr: Addr,
 ) -> Result<u32> {
@@ -53,7 +52,7 @@ async fn read_device_register_word(
 }
 
 async fn read_device_register_sized<const N: usize>(
-    cont: &mut Controller<impl Backend>,
+    cont: &mut Controller,
     active_slr: u8,
     addr: Addr,
 ) -> Result<&[u8; N]> {
@@ -68,8 +67,8 @@ async fn read_device_register_sized<const N: usize>(
     Ok(slice.try_into()?)
 }
 
-async fn read_jtag_register<B: Backend>(
-    cont: &mut Controller<B>,
+async fn read_jtag_register(
+    cont: &mut Controller,
     active_slr: u8,
     inst: u8,
     len: Bytes<usize>,
@@ -78,8 +77,8 @@ async fn read_jtag_register<B: Backend>(
         .await
 }
 
-async fn read_jtag_register_sized<const N: usize, B: Backend>(
-    cont: &mut Controller<B>,
+async fn read_jtag_register_sized<const N: usize>(
+    cont: &mut Controller,
     active_slr: u8,
     inst: u8,
 ) -> Result<&[u8; N]> {
@@ -91,8 +90,8 @@ async fn read_jtag_register_sized<const N: usize, B: Backend>(
         })
 }
 
-pub async fn read_xadc<B: Backend>(
-    cont: &mut Controller<B>,
+pub async fn read_xadc(
+    cont: &mut Controller,
     active_slr: u8,
     regs: impl IntoIterator<Item = drp::Command>,
 ) -> Result<&[u8]> {
@@ -120,7 +119,7 @@ bitflags! {
     }
 }
 
-async fn is_done_status(cont: &mut Controller<impl Backend>) -> Option<Status> {
+async fn is_done_status(cont: &mut Controller) -> Option<Status> {
     match read_device_register_word(cont, 0, Addr::Stat).await {
         Ok(s) => {
             let s = Status::from_bits_retain(s);
@@ -137,7 +136,7 @@ pub struct ProgramStats {
     pub success: bool,
 }
 
-pub async fn program<B: Backend>(cont: &mut Controller<B>, data: &[u8]) -> Result<ProgramStats> {
+pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats> {
     let start = Instant::now();
     cont.run([Command::ir(commands::JPROGRAM as _)]).await?;
 
@@ -169,7 +168,7 @@ pub async fn program<B: Backend>(cont: &mut Controller<B>, data: &[u8]) -> Resul
     })
 }
 
-pub async fn readback<B: Backend>(cont: &mut Controller<B>, len: Bytes<usize>) -> Result<&[u8]> {
+pub async fn readback(cont: &mut Controller, len: Bytes<usize>) -> Result<&[u8]> {
     use self::registers::{Addr, OpCode, type2};
     let readback = [
         Type1::SYNC,

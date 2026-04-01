@@ -1,9 +1,9 @@
-use nafa_io::{Backend, Controller};
+use nafa_io::Controller;
 
 #[derive(clap::Args)]
 pub struct Args {}
 
-pub async fn run(cont: &mut Controller<Box<dyn Backend>>, _args: Args) -> Result<(), eyre::Error> {
+pub async fn run(cont: &mut Controller, _args: Args) -> Result<(), eyre::Error> {
     use nafa_io::devices::Specific as S;
     use nafa_xilinx::_32bit::drp::{Addr, Cmd, Command, Transfer};
 

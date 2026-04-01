@@ -1,5 +1,5 @@
 use eyre::Result;
-use nafa_io::{Backend, Controller};
+use nafa_io::Controller;
 
 mod info;
 mod program;
@@ -23,7 +23,7 @@ impl Command {
 }
 
 pub async fn run(
-    cont: &mut Controller<Box<dyn Backend>>,
+    cont: &mut Controller,
     pb: Option<&indicatif::ProgressBar>,
     command: Command,
 ) -> Result<Option<Box<dyn FnOnce()>>> {

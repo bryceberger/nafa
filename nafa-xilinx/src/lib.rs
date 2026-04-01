@@ -1,6 +1,6 @@
 use eyre::Result;
 use facet::Facet;
-use nafa_io::{Backend, Controller};
+use nafa_io::Controller;
 
 use crate::{
     _32bit::info::{S7, UP, US},
@@ -11,10 +11,10 @@ pub mod _32bit;
 pub mod zynq_32;
 
 trait Read: Sized {
-    fn read(cont: &mut Controller<impl Backend>) -> impl Future<Output = Result<Self>>;
+    async fn read(cont: &mut Controller) -> Result<Self>;
 }
 
-pub async fn read(cont: &mut Controller<impl Backend>) -> Result<XilinxInfo> {
+pub async fn read(cont: &mut Controller) -> Result<XilinxInfo> {
     use nafa_io::devices::{Specific as S, Xilinx32Family as F, Xilinx32Info as I};
     match cont.info().specific {
         S::Xilinx32(I { family: F::S7, .. }) => {

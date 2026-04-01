@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use nafa_io::{Backend, Controller, devices::Specific, units::Bytes};
+use nafa_io::{Controller, devices::Specific, units::Bytes};
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -8,7 +8,7 @@ pub struct Args {
 }
 
 pub async fn run(
-    cont: &mut Controller<Box<dyn Backend>>,
+    cont: &mut Controller,
     pb: Option<&indicatif::ProgressBar>,
     args: Args,
 ) -> Result<Option<Box<dyn FnOnce()>>, eyre::Error> {

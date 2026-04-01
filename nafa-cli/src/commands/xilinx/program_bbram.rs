@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use nafa_io::{
-    Backend, Controller,
+    Controller,
     devices::{Specific, Xilinx32Info},
 };
 
@@ -25,7 +25,7 @@ pub struct Args {
     pub dpa: Option<nafa_xilinx::_32bit::bbram::Dpa>,
 }
 
-pub async fn run(cont: &mut Controller<Box<dyn Backend>>, opts: Args) -> Result<(), eyre::Error> {
+pub async fn run(cont: &mut Controller, opts: Args) -> Result<(), eyre::Error> {
     use nafa_xilinx::_32bit::{bbram, nky};
     let num_slr = match cont.info().specific {
         Specific::Xilinx32(Xilinx32Info { slr, .. }) => slr,

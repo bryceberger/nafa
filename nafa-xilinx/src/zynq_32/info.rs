@@ -1,6 +1,6 @@
 use eyre::Result;
 use facet::Facet;
-use nafa_io::{Backend, Controller};
+use nafa_io::Controller;
 
 use super::{
     read_device_register_word as device_register, read_jtag_register_sized as jtag_register,
@@ -42,7 +42,7 @@ pub struct ZPJtag {
 }
 
 impl Read for ZP {
-    async fn read(cont: &mut Controller<impl Backend>) -> Result<Self> {
+    async fn read(cont: &mut Controller) -> Result<Self> {
         let jtag = ZPJtag {
             idcode_ps: *jtag_register(cont, commands::IDCODE).await?,
             idcode_pl: *jtag_register(cont, commands::IDCODE_PL).await?,

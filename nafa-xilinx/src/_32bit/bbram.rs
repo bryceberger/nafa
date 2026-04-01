@@ -1,6 +1,5 @@
 use eyre::Result;
-use nafa_io::{
-    Backend, Command, Controller,
+use nafa_io::{Command, Controller,
     devices::Xilinx32Family,
     units::{Bits, Bytes},
 };
@@ -8,7 +7,7 @@ use nafa_io::{
 use crate::_32bit::{commands, crc::Crc, shift_for_slr};
 
 pub async fn program_key(
-    cont: &mut Controller<impl Backend>,
+    cont: &mut Controller,
     keys: &[[u8; 32]],
     dpa: Option<Dpa>,
 ) -> Result<()> {
@@ -80,7 +79,7 @@ pub async fn program_key(
 }
 
 async fn check_crc(
-    cont: &mut Controller<impl Backend>,
+    cont: &mut Controller,
     ctrl_word: u32,
     slr: u8,
     key: &[u8; 32],

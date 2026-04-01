@@ -1,6 +1,6 @@
 use eyre::Result;
 use facet::Facet;
-use nafa_io::{Backend, Controller, devices::DeviceInfo};
+use nafa_io::{Controller, devices::DeviceInfo};
 
 use super::{
     commands, read_device_register_word as device_register,
@@ -102,7 +102,7 @@ fn get_num_slr(info: &DeviceInfo) -> u8 {
 }
 
 impl Read for S7 {
-    async fn read(cont: &mut Controller<impl Backend>) -> Result<Self> {
+    async fn read(cont: &mut Controller) -> Result<Self> {
         let num_slr = get_num_slr(cont.info());
         let jtag = S7Jtag {
             device: S7JtagPerDevice {
@@ -129,7 +129,7 @@ impl Read for S7 {
 }
 
 impl Read for US {
-    async fn read(cont: &mut Controller<impl Backend>) -> Result<Self> {
+    async fn read(cont: &mut Controller) -> Result<Self> {
         let num_slr = get_num_slr(cont.info());
         let jtag = USJtag {
             device: USJtagPerDevice {
@@ -143,7 +143,7 @@ impl Read for US {
 }
 
 impl Read for UP {
-    async fn read(cont: &mut Controller<impl Backend>) -> Result<Self> {
+    async fn read(cont: &mut Controller) -> Result<Self> {
         let num_slr = get_num_slr(cont.info());
         let jtag = UPJtag {
             device: UPJtagPerDevice {
@@ -165,7 +165,7 @@ async fn read_slrs<T>(num_slr: u8, mut f: impl AsyncFnMut(u8) -> Result<T>) -> R
 }
 
 async fn read_us_jtag_per_slr(
-    cont: &mut Controller<impl Backend>,
+    cont: &mut Controller,
     num_slr: u8,
 ) -> Result<Vec<USJtagPerSlr>, eyre::Error> {
     read_slrs(num_slr, async |slr| {
@@ -207,7 +207,7 @@ async fn read_us_jtag_per_slr(
 // incorrect output.
 // Specifically, it read `ctl0` twice, then zeroes for the rest (when attempted
 // on an XC7A35T)
-async fn read_registers(cont: &mut Controller<impl Backend>, num_slr: u8) -> Result<Registers> {
+async fn read_registers(cont: &mut Controller, num_slr: u8) -> Result<Registers> {
     let slrs = read_slrs(num_slr, async |slr| {
         Ok(RegistersPerSlr {
             ctl0: device_register(cont, slr, Addr::Ctl0).await?,

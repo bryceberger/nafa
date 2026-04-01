@@ -115,7 +115,7 @@ async fn async_main(Args { global, command }: Args) -> Result<()> {
 }
 
 async fn run(
-    cont: &mut Controller<Box<dyn Backend>>,
+    cont: &mut Controller,
     pb: Option<&indicatif::ProgressBar>,
     command: ControllerCommand,
 ) -> Result<Option<Box<dyn FnOnce()>>, eyre::Error> {
@@ -150,7 +150,7 @@ async fn get_controller(
     devices: &HashMap<IdCode, DeviceInfo>,
     addr: UsbAddr,
     jtag_idx: Option<usize>,
-) -> Result<Controller<Box<dyn Backend>>> {
+) -> Result<Controller> {
     fn chain_info(devices: &[(IdCode, DeviceInfo)]) -> String {
         let devices = devices.iter().enumerate();
         devices.fold(String::new(), |mut acc, (idx, (idcode, info))| {

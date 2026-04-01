@@ -6,7 +6,7 @@
 
 use eyre::Result;
 use nafa_io::{
-    Backend, Command, Controller,
+    Command, Controller,
     units::{Bytes, Words32},
 };
 
@@ -19,7 +19,7 @@ pub mod commands;
 pub mod info;
 
 pub async fn read_device_register(
-    cont: &mut Controller<impl Backend>,
+    cont: &mut Controller,
     reg: Type1,
 ) -> Result<&[u8]> {
     let tiny_bitstream =
@@ -35,14 +35,14 @@ pub async fn read_device_register(
     .await
 }
 
-async fn read_device_register_word(cont: &mut Controller<impl Backend>, addr: Addr) -> Result<u32> {
+async fn read_device_register_word(cont: &mut Controller, addr: Addr) -> Result<u32> {
     let data = read_device_register_sized(cont, addr).await?;
     let data = data.map(|x| x.reverse_bits());
     Ok(u32::from_be_bytes(data))
 }
 
 async fn read_device_register_sized<const N: usize>(
-    cont: &mut Controller<impl Backend>,
+    cont: &mut Controller,
     addr: Addr,
 ) -> Result<&[u8; N]> {
     const { assert!(N.is_multiple_of(4)) };
@@ -55,16 +55,16 @@ async fn read_device_register_sized<const N: usize>(
         })
 }
 
-async fn read_jtag_register<B: Backend>(
-    cont: &mut Controller<B>,
+async fn read_jtag_register(
+    cont: &mut Controller,
     inst: u32,
     len: Bytes<usize>,
 ) -> Result<&[u8]> {
     cont.run([Command::ir(inst), Command::dr_rx(len)]).await
 }
 
-async fn read_jtag_register_sized<const N: usize, B: Backend>(
-    cont: &mut Controller<B>,
+async fn read_jtag_register_sized<const N: usize>(
+    cont: &mut Controller,
     inst: u32,
 ) -> Result<&[u8; N]> {
     read_jtag_register(cont, inst, Bytes(N)).await.map(|x| {
