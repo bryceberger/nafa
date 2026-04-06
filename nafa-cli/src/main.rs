@@ -58,12 +58,15 @@ enum StandaloneCommand {
 enum ControllerCommand {
     #[command(subcommand)]
     Xilinx(commands::xilinx::Command),
+    #[command(subcommand)]
+    Microchip(commands::microchip::Command),
 }
 
 impl ControllerCommand {
     fn wants_progress(&self) -> bool {
         match self {
             Self::Xilinx(command) => command.wants_progress(),
+            Self::Microchip(command) => false,
         }
     }
 }
@@ -121,6 +124,7 @@ async fn run(
 ) -> Result<Option<Box<dyn FnOnce()>>, eyre::Error> {
     match command {
         ControllerCommand::Xilinx(cmd) => commands::xilinx::run(cont, pb, cmd).await,
+        ControllerCommand::Microchip(cmd) => commands::microchip::run(cont, cmd).await,
     }
 }
 

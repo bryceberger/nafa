@@ -1,3 +1,7 @@
 /target
 .envrc
 __pycache__
+
+# Vivado
+*.jou
+*.log

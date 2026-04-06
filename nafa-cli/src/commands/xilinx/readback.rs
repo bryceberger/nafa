@@ -13,7 +13,6 @@ pub async fn run(
     args: Args,
 ) -> Result<Option<Box<dyn FnOnce()>>, eyre::Error> {
     let data = match &cont.info().specific {
-        Specific::Unknown | Specific::Intel => todo!(),
         Specific::Xilinx32(info) => {
             let len = info.readback.into();
             if let Some(pb) = pb {
@@ -21,6 +20,7 @@ pub async fn run(
             }
             nafa_xilinx::_32bit::readback(cont, len).await?
         }
+        _ => todo!("called xilinx readback with non-xilinx active device"),
     };
     std::fs::write(args.output_file, data)?;
     Ok(None)
