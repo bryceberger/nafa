@@ -17,6 +17,7 @@ pub enum Specific {
     Unknown,
     Xilinx32(Xilinx32Info),
     Intel,
+    Microchip,
 }
 
 pub trait GetSpecific<T> {
@@ -56,7 +57,10 @@ pub enum Xilinx32Family {
 /// Returns iterator of `(idcode, info)`. Intended to be collected into a
 /// `HashMap`, to be passed to [`crate::Controller::new`].
 pub fn builtin() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
-    [].into_iter().chain(xilinx()).chain(intel())
+    [].into_iter()
+        .chain(xilinx())
+        .chain(intel())
+        .chain(microchip())
 }
 
 const fn id(code: u32) -> IdCode {
@@ -77,6 +81,19 @@ fn intel() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
         info(0x020D10DD, 10, "vtap10"),
         info(0x020F30DD, 10, "10CL025"),
         info(0x031820DD, 10, "10M08S"),
+    ];
+
+    DEVICES.iter().cloned()
+}
+
+fn microchip() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
+    use Bits as B;
+    use Specific as S;
+
+    #[rustfmt::skip]
+    static DEVICES: &[(IdCode, DeviceInfo)] = &[
+        // polarfire (8 IR_Len)
+        (id(0x5F8131CF), DeviceInfo { irlen: B(8), name: "MPF300T", specific: S::Microchip }),
     ];
 
     DEVICES.iter().cloned()

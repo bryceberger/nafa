@@ -1,0 +1,185 @@
+Scan Chain...
+JTAG TCK / SPI SCK frequency = 1 MHz
+Check Chain...
+Scan and Check Chain PASSED.
+device 'MPF300T' : Executing action DEVICE_INFO
+JTAG TCK / SPI SCK frequency = 4 MHz
+
+
+EXPORT Algo_version[16] = 0002
+EXPORT IDCODE[32] = 5f8131cf
+Family: PolarFire
+Product: MPF300T
+Die Revision: 5
+Die Firmware Version: 3.19
+
+//Will send 0xCD until it first bit of recieved data is not one, then it will move onto the next command
+EXPORT UDV[32] = 63510313
+
+EXPORT SILSIG[32] = 00000000
+FPGA Array is programmed and enabled.
+Design Name: top
+// Info: https://onlinedocs.microchip.com/oxy/GUID-4F4EDA17-350C-4EC3-B601-9F459DD028EF-en-US-4/GUID-A4D636A3-95C1-426B-A17B-5014CEBA60C5.html
+EXPORT CHECKSUM[16] = 5ecf
+
+// ShiftIR 0xF2 and give addres location 0x0 in SHIFTDR, then gives the data in next SHIFTDR.
+// 0xA3 changes address space? same 0xF2 address gives different data after 3 0xA2 commands
+EXPORT READ_DESIGN_INFO: [288] = 00000000000000000000000000000000000000000000000000000000000000706f745ecf
+
+EXPORT DESIGNVER[16] = 0000
+EXPORT BACKLEVEL[16] = 0000
+Reading digests for all the segments from the device...
+
+// Post 0xA3 commands - 0xF2 address increments by 2 for each half
+EXPORT CHECK FABRIC digest[256] = ce9bc81ad8075dee55230ac3060a6ac298c0f7144c6767e17f574d124a418982
+EXPORT CC digest[256] = 318dae34366d3485ccbb38da10cba21e12dad9ce40b6433c83a8015bead2015e
+EXPORT SNVM digest[256] = 57e24b6794c755a29e0e4cb2fa4b6bad6d916e1843387a0996393e09e0a950ed
+EXPORT UL digest[256] = 0000000000000000000000000000000000000000000000000000000000000000
+EXPORT UKDIGEST0 digest[256] = 0000000000000000000000000000000000000000000000000000000000000000
+EXPORT UKDIGEST1 digest[256] = 0000000000000000000000000000000000000000000000000000000000000000
+EXPORT UKDIGEST2 digest[256] = d45264ac8021c51b0e1a01764b865b74ccf1bec3d20c40078063d19891aba92e
+EXPORT UKDIGEST3 digest[256] = 4bfb5927a93198eae8f0d920233d00439b9709d36eef982730206ad142fda5f5
+EXPORT UKDIGEST4 digest[256] = 0000000000000000000000000000000000000000000000000000000000000000
+EXPORT UKDIGEST5 digest[256] = d45264ac8021c51b0e1a01764b865b74ccf1bec3d20c40078063d19891aba92e
+EXPORT UKDIGEST6 digest[256] = 4bfb5927a93198eae8f0d920233d00439b9709d36eef982730206ad142fda5f5
+EXPORT UPERM digest[256] = 49a5818c4fff9561dff202eddf5d7b9dca9189afe8e0c6eb76de64f6726abb93
+EXPORT SYS digest[256] = 249315448a235c7d53542f4b59ca1cc936b8b08be04fe58ba0030b6b5dc3e52b
+Please refer to System Services User Guide for more details about different digests.
+---------------------------------------
+
+// Post 0xE7 commands - 0xF2 address increments by 2 for each half
+EXPORT DEBUG_INFO[672] = 000003ff
+
+In the logic analyzer:      010000100000000000000000000000000
+How it is given:            10000100000000000000000000000000
+
+In the logic analyzer:      0000001B000000442000000CA00000300
+How it is given:            000001b000000442000000ca00000300
+
+In the logic analyzer:      00000000000000000E08AB2012DEA0201
+How it is given:            0000000000000000e08ab2012dea0201
+
+In the logic analyzer:      00000000000000000000019BC0276071B
+How it is given:            0000000000000000000019bc0276071b
+
+In the logic analyzer:      009CB09C009CB001E001C0025C7000000
+How it is given:            09cb09c009cb001e001c0025c7000000
+
+CYCLE COUNT: 432
+Programming Mode: JTAG
+Algorithm Version: 1
+Programmer: FlashPro5
+Software Version: 2025.2
+Programming Software: FlashPro Express
+Programming File Type: PPD
+
+// Device Serial Number (DSN):
+// The device serial number (DSN) is a 128-bit unique device ID. It comprises of two parts—the factory
+// serial number (FSN) and the serial number modifier (SNM). The first part of the device serial number
+// is the 64-bit FSN that uniquely identifies a device. The DSN is zeroized if “unrecoverable” zeroization
+// action is performed on the device. For more information about zeroization, see Zeroization.
+// The device serial number can be read by the user logic using a system service call. For more
+// information, see PolarFire FPGA and PolarFire SoC FPGA System Services User Guide.
+===================================================================================
+EXPORT DSN[128] = f530a28e59e3bf8aa5b560e5e3eed565
+===================================================================================
+
+// Fetches non-volatilse states of user security locks
+--- Security locks and configuration settings ---
+EXPORT QUERY_SECURITY[72] = 000000000000000000
+Microsemi factory test mode access is allowed.
+
+// NOT FOUND IN JTAG - Used to verify it is unmodified from the factory
+EXPORT Factory Integrity Bits[256] = 4be48dc078655d410fcdce9bf440e55e2fab9525a27eb8f1e4b1db5c9d0caff6
+
+// f2 commands - If this doesn't match the factory Integrity bits, then the device has been used
+EXPORT Device Integrity Bits[256] = 0000000000000000000000000000000000000000000000000000000000000000
+Device Integrity Status : FAIL
+Please refer to Device Integrity Protection section of the PolarFire Family FPGA Security User Guide.
+
+===================================================================================
+EXPORT DSN[128] = f530a28e59e3bf8aa5b560e5e3eed565
+===================================================================================
+
+
+// A lot of things have an extra Byte of data at the front.
+
+// Every A2 ShiftIR command is followed by either 0x80 or 0x01.
+// 0x80 = Not ready to read registers yet
+// 0x01 = Ready to read registersScan Chain...
+JTAG TCK / SPI SCK frequency = 1 MHz
+Check Chain...
+Scan and Check Chain PASSED.
+device 'MPF300T' : Executing action DEVICE_INFO
+JTAG TCK / SPI SCK frequency = 4 MHz
+
+
+EXPORT Algo_version[16] = 0002
+EXPORT IDCODE[32] = 5f8131cf
+Family: PolarFire
+Product: MPF300T
+Die Revision: 5
+Die Firmware Version: 3.19
+
+//Will send 0xCD until it first bit of recieved data is not one, then it will move onto the next command
+EXPORT UDV[32] = 63510313
+
+EXPORT SILSIG[32] = 00000000
+FPGA Array is programmed and enabled.
+Design Name: top
+EXPORT CHECKSUM[16] = 5ecf
+
+// ShiftIR 0xF2 and give addres location 0x0 in SHIFTDR, then gives the data in next SHIFTDR.
+// 0xA3 changes address space? same 0xF2 address gives different data after 3 0xA2 commands
+EXPORT READ_DESIGN_INFO: [288] = 00000000000000000000000000000000000000000000000000000000000000706f745ecf
+
+EXPORT DESIGNVER[16] = 0000
+EXPORT BACKLEVEL[16] = 0000
+Reading digests for all the segments from the device...
+
+// Post 0xA3 commands - 0xF2 address increments by 2 for each half
+EXPORT CHECK FABRIC digest[256] = ce9bc81ad8075dee55230ac3060a6ac298c0f7144c6767e17f574d124a418982
+EXPORT CC digest[256] = 318dae34366d3485ccbb38da10cba21e12dad9ce40b6433c83a8015bead2015e
+EXPORT SNVM digest[256] = 57e24b6794c755a29e0e4cb2fa4b6bad6d916e1843387a0996393e09e0a950ed
+EXPORT UL digest[256] = 0000000000000000000000000000000000000000000000000000000000000000
+EXPORT UKDIGEST0 digest[256] = 0000000000000000000000000000000000000000000000000000000000000000
+EXPORT UKDIGEST1 digest[256] = 0000000000000000000000000000000000000000000000000000000000000000
+EXPORT UKDIGEST2 digest[256] = d45264ac8021c51b0e1a01764b865b74ccf1bec3d20c40078063d19891aba92e
+EXPORT UKDIGEST3 digest[256] = 4bfb5927a93198eae8f0d920233d00439b9709d36eef982730206ad142fda5f5
+EXPORT UKDIGEST4 digest[256] = 0000000000000000000000000000000000000000000000000000000000000000
+EXPORT UKDIGEST5 digest[256] = d45264ac8021c51b0e1a01764b865b74ccf1bec3d20c40078063d19891aba92e
+EXPORT UKDIGEST6 digest[256] = 4bfb5927a93198eae8f0d920233d00439b9709d36eef982730206ad142fda5f5
+EXPORT UPERM digest[256] = 49a5818c4fff9561dff202eddf5d7b9dca9189afe8e0c6eb76de64f6726abb93
+EXPORT SYS digest[256] = 249315448a235c7d53542f4b59ca1cc936b8b08be04fe58ba0030b6b5dc3e52b
+Please refer to System Services User Guide for more details about different digests.
+---------------------------------------
+
+// Post 0xE7 commands - 0xF2 address increments by 2 for each half
+EXPORT DEBUG_INFO[672] = 000003ff10000100000000000000000000000000000001b000000442000000ca000003000000000000000000e08ab2012dea02010000000000000000000019bc0276071b09cb09c009cb001e001c0025c7000000
+CYCLE COUNT: 432
+Programming Mode: JTAG
+Algorithm Version: 1
+Programmer: FlashPro5
+Software Version: 2025.2
+Programming Software: FlashPro Express
+Programming File Type: PPD
+
+// continued 0xE7
+// todo find what dsn is
+===================================================================================
+EXPORT DSN[128] = f530a28e59e3bf8aa5b560e5e3eed565
+===================================================================================
+--- Security locks and configuration settings ---
+EXPORT QUERY_SECURITY[72] = 000000000000000000
+Microsemi factory test mode access is allowed.
+
+// NOT FOUND IN JTAG
+EXPORT Factory Integrity Bits[256] = 4be48dc078655d410fcdce9bf440e55e2fab9525a27eb8f1e4b1db5c9d0caff6
+EXPORT Device Integrity Bits[256] = 0000000000000000000000000000000000000000000000000000000000000000
+Device Integrity Status : FAIL
+Please refer to Device Integrity Protection section of the PolarFire Family FPGA Security User Guide.
+
+// Send 0xE1, then receive 0x0 then 0xF2 address
+===================================================================================
+EXPORT DSN[128] = f530a28e59e3bf8aa5b560e5e3eed565
+===================================================================================

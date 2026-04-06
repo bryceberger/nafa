@@ -16,6 +16,7 @@ hex.workspace = true
 indicatif = "0.18.2"
 nafa-io.workspace = true
 nafa-xilinx.workspace = true
+nafa-microchip.workspace = true
 nusb.workspace = true
 smol.workspace = true
 tracing-error = "0.2"

@@ -1,0 +1,19 @@
+[package]
+name = "nafa-microchip"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+bitflags = "2.11.0"
+clap.workspace = true
+eyre.workspace = true
+facet.workspace = true
+facet-python.workspace = true
+hex.workspace = true
+nafa-io.workspace = true
+nom = "8"
+smol.workspace = true
+thiserror = "2"
+tracing.workspace = true

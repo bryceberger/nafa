@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["nafa-cli", "nafa-io", "nafa-xilinx"]
+members = ["nafa-cli", "nafa-io", "nafa-microchip", "nafa-xilinx"]
 default-members = ["nafa-cli"]
 
 [workspace.package]
@@ -21,6 +21,7 @@ hex = "0.4"
 nafa-cli.path = "nafa-cli"
 nafa-io.path = "nafa-io"
 nafa-xilinx.path = "nafa-xilinx"
+nafa-microchip.path = "nafa-microchip"
 nusb = { version = "0.2.1", features = ["smol"] }
 smol = "2"
 strum = "0.28"
