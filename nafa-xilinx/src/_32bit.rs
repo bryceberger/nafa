@@ -1,10 +1,14 @@
-use std::time::{Duration, Instant};
+use std::{
+    task::Poll,
+    time::{Duration, Instant},
+};
 
 use bitflags::bitflags;
 use eyre::Result;
 use nafa_io::{Command, Controller,
     units::{Bytes, Words32},
 };
+use smol::future::FutureExt;
 
 use self::registers::{Addr, Type1};
 
@@ -151,13 +155,24 @@ pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats>
     .await?;
     let end_program = Instant::now();
 
-    let success = loop {
-        match is_done_status(cont).await {
-            Some(x) if x.contains(Status::DONE) => break true,
-            Some(_) => break false,
-            None => {}
+    let stop = end_program + Duration::from_millis(100);
+    let timeout = smol::future::poll_fn(move |_| {
+        if Instant::now() < stop {
+            Poll::Pending
+        } else {
+            Poll::Ready(false)
+        }
+    });
+    let status = async {
+        loop {
+            match is_done_status(cont).await {
+                Some(x) if x.contains(Status::DONE) => break true,
+                Some(_) => break false,
+                None => {}
+            }
         }
     };
+    let success = status.or(timeout).await;
     let end_status = Instant::now();
 
     Ok(ProgramStats {
