@@ -17,7 +17,7 @@ pub struct Device {
     reads: Vec<Read>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Read {
     Bytes(usize),
     ExtraBit,

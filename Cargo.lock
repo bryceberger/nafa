@@ -848,6 +848,7 @@ dependencies = [
  "hex",
  "indicatif",
  "nafa-io",
+ "nafa-microchip",
  "nafa-xilinx",
  "nusb",
  "smol",
@@ -871,6 +872,24 @@ dependencies = [
  "smol",
  "strum",
  "tracing",
+]
+
+[[package]]
+name = "nafa-microchip"
+version = "0.0.1"
+dependencies = [
+ "bitflags",
+ "clap",
+ "eyre",
+ "facet",
+ "facet-python",
+ "hex",
+ "nafa-io",
+ "nom",
+ "smol",
+ "thiserror",
+ "tracing",
+ "zerocopy",
 ]
 
 [[package]]
@@ -1400,4 +1419,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "zerocopy"
+version = "0.8.48"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.48"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]

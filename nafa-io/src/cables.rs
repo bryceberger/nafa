@@ -124,4 +124,7 @@ pub const KNOWN: &[Cable] = &[
     c(0x09fb, 0x6010, "usb-blaster II", |device| {
         Box::pin(async { Ok(Box::new(usb_blaster::Device::new(device).await?) as BoxedBackend) })
     }),
+    c(0x1514, 0x2008, "flashpro5_ft4232hl", |device| {
+        init_ftdi(device, &ftdi::devices::FT4232HL, 4_000_000)
+    }),
 ];
