@@ -5,7 +5,8 @@ use std::{
 
 use bitflags::bitflags;
 use eyre::Result;
-use nafa_io::{Command, Controller,
+use nafa_io::{
+    Command, Controller,
     units::{Bytes, Words32},
 };
 use smol::future::FutureExt;
@@ -13,6 +14,7 @@ use smol::future::FutureExt;
 use self::registers::{Addr, Type1};
 
 pub mod bbram;
+pub mod bitstream;
 pub mod commands;
 mod crc;
 pub mod drp;
