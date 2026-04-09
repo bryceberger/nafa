@@ -148,6 +148,7 @@ pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats>
     let end_shutdown = Instant::now();
 
     cont.run([
+        Command::ir(commands::JSHUTDOWN as _),
         Command::ir(commands::CFG_IN as _),
         Command::dr_tx_with_notification(data),
         Command::ir(commands::JSTART as _),
