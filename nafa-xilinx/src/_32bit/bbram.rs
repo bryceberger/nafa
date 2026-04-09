@@ -1,16 +1,13 @@
 use eyre::Result;
-use nafa_io::{Command, Controller,
+use nafa_io::{
+    Command, Controller,
     devices::Xilinx32Family,
     units::{Bits, Bytes},
 };
 
-use crate::_32bit::{commands, crc::Crc, shift_for_slr};
+use crate::_32bit::{commands, commands::duplicated, crc::Crc};
 
-pub async fn program_key(
-    cont: &mut Controller,
-    keys: &[[u8; 32]],
-    dpa: Option<Dpa>,
-) -> Result<()> {
+pub async fn program_key(cont: &mut Controller, keys: &[[u8; 32]], dpa: Option<Dpa>) -> Result<()> {
     let info = match &cont.info().specific {
         nafa_io::devices::Specific::Xilinx32(info) => info,
         _ => panic!("xilinx bbram programming called with non-xilinx active device"),
@@ -26,20 +23,19 @@ pub async fn program_key(
     let ctrl_word = ctrl_word(dpa, false);
 
     cont.run([
-        Command::ir(shift_for_slr(0, commands::JPROGRAM)),
-        Command::ir(shift_for_slr(0, commands::ISC_NOOP)),
+        Command::ir(duplicated(commands::JPROGRAM)),
+        Command::ir(duplicated(commands::ISC_NOOP)),
     ])
     .await?;
     smol::Timer::after(std::time::Duration::from_millis(100)).await;
 
     let mut crc_correct = true;
-    for (slr, key) in keys.iter().enumerate() {
+    for key in keys {
         let key_chunks: &[[u8; 4]] = key.as_chunks().0;
-        let slr = slr as u8;
 
-        let enable = shift_for_slr(slr, commands::ISC_ENABLE);
-        let program_key = shift_for_slr(slr, commands::XSC_PROGRAM_KEY);
-        let program = shift_for_slr(slr, commands::ISC_PROGRAM);
+        let enable = duplicated(commands::ISC_ENABLE);
+        let program_key = duplicated(commands::XSC_PROG_SEC);
+        let program = duplicated(commands::ISC_PROGRAM);
 
         #[rustfmt::skip]
         cont.run([
@@ -61,14 +57,14 @@ pub async fn program_key(
         ]).await?;
 
         if has_crc {
-            crc_correct = check_crc(cont, ctrl_word, slr, key).await?;
+            crc_correct = check_crc(cont, ctrl_word, key).await?;
             if !crc_correct {
                 break;
             }
         }
     }
 
-    cont.run([Command::ir(shift_for_slr(0, commands::ISC_DISABLE)), Command::dr_tx(&[0xff; 4])])
+    cont.run([Command::ir(duplicated(commands::ISC_DISABLE)), Command::dr_tx(&[0xff; 4])])
         .await?;
 
     if crc_correct {
@@ -78,24 +74,13 @@ pub async fn program_key(
     }
 }
 
-async fn check_crc(
-    cont: &mut Controller,
-    ctrl_word: u32,
-    slr: u8,
-    key: &[u8; 32],
-) -> Result<bool> {
+async fn check_crc(cont: &mut Controller, ctrl_word: u32, key: &[u8; 32]) -> Result<bool> {
     let expected = crc(ctrl_word, key);
     let expected_bytes = expected.to_le_bytes();
 
-    let program = [
-        Command::ir(shift_for_slr(slr, commands::ISC_PROGRAM)),
-        Command::dr_tx(&expected_bytes),
-    ];
+    let program = [Command::ir(duplicated(commands::ISC_PROGRAM)), Command::dr_tx(&expected_bytes)];
 
-    let readback = [
-        Command::ir(shift_for_slr(slr, commands::XSC_READ_RSVD)),
-        Command::dr_rx(Bytes(5)),
-    ];
+    let readback = [Command::ir(duplicated(commands::ISC_READ)), Command::dr_rx(Bytes(5))];
     let readback = std::iter::repeat_n(readback, 10).flatten();
 
     let data = cont.run(program.into_iter().chain(readback)).await?;

@@ -1,41 +1,74 @@
-pub use self::internal::*;
+pub use self::{Duplicated::*, Master::*, Shifted::*};
 
-// from XC7VX690T.bsdl
+pub const fn duplicated(val: Duplicated) -> u32 {
+    let val = val as u8 as u32;
+    val | val << 6 | val << (6 * 2) | val << (6 * 3) | val << (6 * 4) | val << (6 * 5)
+}
+
+pub const fn master(val: Master, num_slr: u8) -> u32 {
+    let val = val as u8 as u32;
+    let shift = (num_slr - 1) * 6;
+    duplicated(ISC_NOOP) & !0b111111 << shift | val << shift
+}
+
+pub const fn shifted(val: Shifted, num_slr: u8, active_slr: u8) -> u32 {
+    let val = val as u8 as u32;
+    let shift = (num_slr - 1 - active_slr) * 6;
+    duplicated(ISC_NOOP) & !0b111111 << shift | val << shift
+}
+
+#[repr(u8)]
+#[expect(non_camel_case_types)]
+#[derive(Clone, Copy)]
 #[rustfmt::skip]
-mod internal {
-    pub const IDCODE:          u8 = 0b001001; // DEVICE_ID
-    pub const BYPASS:          u8 = 0b111111; // BYPASS
-    pub const EXTEST:          u8 = 0b100110; // BOUNDARY
-    pub const SAMPLE:          u8 = 0b000001; // BOUNDARY
-    pub const PRELOAD:         u8 = 0b000001; // Same as SAMPLE
-    pub const USERCODE:        u8 = 0b001000; // DEVICE_ID
-    pub const HIGHZ:           u8 = 0b001010; // BYPASS
-    pub const EXTEST_PULSE:    u8 = 0b111100; // BOUNDARY
-    pub const EXTEST_TRAIN:    u8 = 0b111101; // BOUNDARY
-    pub const ISC_ENABLE:      u8 = 0b010000; // ISC_CONFIG
-    pub const ISC_PROGRAM:     u8 = 0b010001; // ISC_PDATA
-    pub const ISC_NOOP:        u8 = 0b010100; // ISC_DEFAULT
-    pub const XSC_READ_RSVD:   u8 = 0b010101; // PRIVATE
-    pub const ISC_DISABLE:     u8 = 0b010110; // ISC_CONFIG
-    pub const XSC_PROGRAM_KEY: u8 = 0b010010; // XSC_KEY_DATA
-    pub const XSC_DNA:         u8 = 0b010111; // DNA
-    pub const CFG_OUT:         u8 = 0b000100; // Not available during configuration with another mode.
-    pub const CFG_IN:          u8 = 0b000101; // Not available during configuration with another mode.
-    pub const JPROGRAM:        u8 = 0b001011; // Not available during configuration with another mode.
-    pub const JSTART:          u8 = 0b001100; // Not available during configuration with another mode.
-    pub const JSHUTDOWN:       u8 = 0b001101; // Not available during configuration with another mode.
-    pub const FUSE_CTS:        u8 = 0b110000; // PRIVATE
-    pub const FUSE_KEY:        u8 = 0b110001; // PRIVATE
-    pub const FUSE_DNA:        u8 = 0b110010; // PRIVATE
-    pub const FUSE_USER:       u8 = 0b110011; // PRIVATE
-    pub const FUSE_USER_128:   u8 = 0b011001; // PRIVATE
-    pub const FUSE_RSA:        u8 = 0b011000;
-    pub const FUSE_SEC:        u8 = 0b111011;
-    pub const FUSE_CNTL:       u8 = 0b110100; // PRIVATE
-    pub const USER1:           u8 = 0b000010; // Not available until after configuration
-    pub const USER2:           u8 = 0b000011; // Not available until after configuration
-    pub const USER3:           u8 = 0b100010; // Not available until after configuration
-    pub const USER4:           u8 = 0b100011; // Not available until after configuration
-    pub const XADC_DRP:        u8 = 0b110111; // PRIVATE
-    pub const INTEST_RSVD:     u8 = 0b000111; // PRIVATE
+pub enum Duplicated {
+    IDCODE       = 0b001001,
+    BYPASS       = 0b111111,
+    EXTEST       = 0b100110,
+    SAMPLE       = 0b000001,
+    HIGHZ_IO     = 0b001010,
+    EXTEST_PULSE = 0b111100,
+    EXTEST_TRAIN = 0b111101,
+    ISC_ENABLE   = 0b010000,
+    ISC_PROGRAM  = 0b010001,
+    XSC_PROG_SEC = 0b010010,
+    ISC_NOOP     = 0b010100,
+    ISC_READ     = 0b010101,
+    ISC_DISABLE  = 0b010110,
+    JPROGRAM     = 0b001011,
+    JSTART       = 0b001100,
+    JSHUTDOWN    = 0b001101,
+    JSTATUS      = 0b100001,
+}
+
+#[repr(u8)]
+#[expect(non_camel_case_types)]
+#[derive(Clone, Copy)]
+#[rustfmt::skip]
+pub enum Master {
+    USERCODE      = 0b001000,
+    XSC_DNA       = 0b010111,
+    FUSE_USER     = 0b110011,
+    FUSE_USER_128 = 0b011001,
+    USER1         = 0b000010,
+    USER2         = 0b000011,
+    USER3         = 0b100010,
+    USER4         = 0b100011,
+    SYSMON_DRP    = 0b110111,
+}
+
+#[repr(u8)]
+#[expect(non_camel_case_types)]
+#[derive(Clone, Copy)]
+#[rustfmt::skip]
+pub enum Shifted {
+    XSC_PROGRAM = 0b010001,
+    CFG_OUT     = 0b000100,
+    CFG_IN      = 0b000101,
+    FUSE_CTS    = 0b110000,
+    FUSE_KEY    = 0b110001,
+    FUSE_DNA    = 0b110010,
+    FUSE_CNTL   = 0b110100,
+    FUSE_RSA    = 0b011000,
+    FUSE_SEC    = 0b111011,
 }

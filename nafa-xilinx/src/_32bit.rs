@@ -10,7 +10,10 @@ use nafa_io::{Command, Controller,
 };
 use smol::future::FutureExt;
 
-use self::registers::{Addr, Type1};
+use self::{
+    commands::{duplicated, master, shifted},
+    registers::{Addr, Type1},
+};
 
 pub mod bbram;
 pub mod commands;
@@ -20,15 +23,9 @@ pub mod info;
 pub mod nky;
 pub mod registers;
 
-fn shift_for_slr(active_slr: u8, inst: u8) -> u32 {
-    assert!(active_slr <= 4);
-    const NOOPS: u32 = 0b_100100_100100_100100_100100_100100;
-    let inst = u32::from(inst & 0b111111);
-    NOOPS & !(0b111111 << (active_slr * 6)) | inst << (active_slr * 6)
-}
-
 pub async fn read_device_register(
     cont: &mut Controller,
+    num_slr: u8,
     active_slr: u8,
     reg: Type1,
 ) -> Result<&[u8]> {
@@ -37,9 +34,9 @@ pub async fn read_device_register(
     let tiny_bitstream = tiny_bitstream.as_flattened();
 
     cont.run([
-        Command::ir(shift_for_slr(active_slr, commands::CFG_IN)),
+        Command::ir(shifted(commands::CFG_IN, num_slr, active_slr)),
         Command::dr_tx(tiny_bitstream),
-        Command::ir(shift_for_slr(active_slr, commands::CFG_OUT)),
+        Command::ir(shifted(commands::CFG_OUT, num_slr, active_slr)),
         Command::dr_rx(Bytes::from(reg.word_count.into_())),
     ])
     .await
@@ -47,16 +44,18 @@ pub async fn read_device_register(
 
 async fn read_device_register_word(
     cont: &mut Controller,
+    num_slr: u8,
     active_slr: u8,
     addr: Addr,
 ) -> Result<u32> {
-    let data = read_device_register_sized(cont, active_slr, addr).await?;
+    let data = read_device_register_sized(cont, num_slr, active_slr, addr).await?;
     let data = data.map(|x| x.reverse_bits());
     Ok(u32::from_be_bytes(data))
 }
 
 async fn read_device_register_sized<const N: usize>(
     cont: &mut Controller,
+    num_slr: u8,
     active_slr: u8,
     addr: Addr,
 ) -> Result<&[u8; N]> {
@@ -64,6 +63,7 @@ async fn read_device_register_sized<const N: usize>(
     let n = u16::try_from(N / 4).unwrap();
     let slice = read_device_register(
         cont,
+        num_slr,
         active_slr,
         Type1::new(registers::OpCode::Read, addr, Words32(n)),
     )
@@ -71,32 +71,42 @@ async fn read_device_register_sized<const N: usize>(
     Ok(slice.try_into()?)
 }
 
-async fn read_jtag_register(
+async fn read_jtag_register_duplicated<const N: usize>(
     cont: &mut Controller,
-    active_slr: u8,
-    inst: u8,
-    len: Bytes<usize>,
-) -> Result<&[u8]> {
-    cont.run([Command::ir(shift_for_slr(active_slr, inst)), Command::dr_rx(len)])
-        .await
+    inst: commands::Duplicated,
+) -> Result<&[u8; N]> {
+    let slice = cont
+        .run([Command::ir(duplicated(inst)), Command::dr_rx(Bytes(N))])
+        .await?;
+    Ok(slice.try_into()?)
 }
 
-async fn read_jtag_register_sized<const N: usize>(
+async fn read_jtag_register_master<const N: usize>(
     cont: &mut Controller,
-    active_slr: u8,
-    inst: u8,
+    num_slr: u8,
+    inst: commands::Master,
 ) -> Result<&[u8; N]> {
-    read_jtag_register(cont, active_slr, inst, Bytes(N))
-        .await
-        .map(|x| {
-            x.try_into()
-                .expect("dr_rx() should always return exact len")
-        })
+    let slice = cont
+        .run([Command::ir(master(inst, num_slr)), Command::dr_rx(Bytes(N))])
+        .await?;
+    Ok(slice.try_into()?)
+}
+
+async fn read_jtag_register_shifted<const N: usize>(
+    cont: &mut Controller,
+    num_slr: u8,
+    active_slr: u8,
+    inst: commands::Shifted,
+) -> Result<&[u8; N]> {
+    let slice = cont
+        .run([Command::ir(shifted(inst, num_slr, active_slr)), Command::dr_rx(Bytes(N))])
+        .await?;
+    Ok(slice.try_into()?)
 }
 
 pub async fn read_xadc(
     cont: &mut Controller,
-    active_slr: u8,
+    num_slr: u8,
     regs: impl IntoIterator<Item = drp::Command>,
 ) -> Result<&[u8]> {
     let drp_commands: Vec<[u8; 4]> = regs
@@ -104,7 +114,7 @@ pub async fn read_xadc(
         .map(|c| c.to_bits().to_le_bytes())
         .collect();
 
-    let start = [Command::ir(shift_for_slr(active_slr, commands::XADC_DRP))];
+    let start = [Command::ir(master(commands::SYSMON_DRP, num_slr))];
     let between = [Command::idle(Bytes(10))];
     let after = [Command::dr_rx(Bytes(4))];
 
@@ -123,8 +133,8 @@ bitflags! {
     }
 }
 
-async fn is_done_status(cont: &mut Controller) -> Option<Status> {
-    match read_device_register_word(cont, 0, Addr::Stat).await {
+async fn is_done_status(cont: &mut Controller, num_slr: u8) -> Option<Status> {
+    match read_device_register_word(cont, num_slr, 0, Addr::Stat).await {
         Ok(s) => {
             let s = Status::from_bits_retain(s);
             s.intersects(Status::INIT_COMPLETE).then_some(s)
@@ -141,17 +151,24 @@ pub struct ProgramStats {
 }
 
 pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats> {
-    let start = Instant::now();
-    cont.run([Command::ir(commands::JPROGRAM as _)]).await?;
+    let info = match &cont.info().specific {
+        nafa_io::devices::Specific::Xilinx32(info) => info,
+        _ => panic!("xilinx programming called with non-xilinx active device"),
+    };
+    let num_slr = info.slr;
 
-    while is_done_status(cont).await.is_none() {}
+    let start = Instant::now();
+    cont.run([Command::ir(duplicated(commands::JPROGRAM))])
+        .await?;
+
+    while is_done_status(cont, num_slr).await.is_none() {}
     let end_shutdown = Instant::now();
 
     cont.run([
-        Command::ir(commands::JSHUTDOWN as _),
-        Command::ir(commands::CFG_IN as _),
+        Command::ir(duplicated(commands::JSHUTDOWN)),
+        Command::ir(shifted(commands::CFG_IN, num_slr, 0)),
         Command::dr_tx_with_notification(data),
-        Command::ir(commands::JSTART as _),
+        Command::ir(duplicated(commands::JSTART)),
     ])
     .await?;
     let end_program = Instant::now();
@@ -166,7 +183,7 @@ pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats>
     });
     let status = async {
         loop {
-            match is_done_status(cont).await {
+            match is_done_status(cont, num_slr).await {
                 Some(x) if x.contains(Status::DONE) => break true,
                 Some(_) => break false,
                 None => {}

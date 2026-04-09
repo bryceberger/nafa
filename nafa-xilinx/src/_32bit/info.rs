@@ -4,74 +4,79 @@ use nafa_io::{Controller, devices::DeviceInfo};
 
 use super::{
     commands, read_device_register_word as device_register,
-    read_jtag_register_sized as jtag_register, registers::Addr,
+    read_jtag_register_duplicated as jtag_duplicated, read_jtag_register_master as jtag_master,
+    read_jtag_register_shifted as jtag_shifted, registers::Addr,
 };
 use crate::Read;
 
-nestify::nest! {
 #[derive(Facet)]
 pub struct S7 {
-    pub jtag: #[derive(Facet)] pub struct S7Jtag {
-        pub device: #[derive(Facet)] pub struct S7JtagPerDevice {
-            pub cntl: [u8; 2],
-        },
-        pub slrs: Vec<#[derive(Facet)] pub struct S7JtagPerSlr {
-            pub idcode: [u8; 4],
-            pub usercode: [u8; 4],
-            pub fuse_dna: [u8; 8],
-            pub fuse_key: [u8; 32],
-            pub fuse_user: [u8; 4],
-            pub user1: [u8; 4],
-            pub user2: [u8; 4],
-            pub user3: [u8; 4],
-            pub user4: [u8; 4],
-        }>,
-    },
+    pub jtag: S7Jtag,
     pub registers: Registers,
 }
-}
 
-nestify::nest! {
 #[derive(Facet)]
 pub struct US {
-    pub jtag: #[derive(Facet)] pub struct USJtag {
-        pub device: #[derive(Facet)] pub struct USJtagPerDevice {
-            pub cntl: [u8; 3],
-        },
-        pub slrs: Vec<USJtagPerSlr>,
-    },
+    pub jtag: USJtag,
     pub registers: Registers,
 }
-}
 
-nestify::nest! {
 #[derive(Facet)]
 pub struct UP {
-    pub jtag: #[derive(Facet)] pub struct UPJtag {
-        pub device: #[derive(Facet)] pub struct UPJtagPerDevice {
-            pub cntl: [u8; 4],
-        },
-        pub slrs: Vec<USJtagPerSlr>,
-    },
+    pub jtag: USJtag,
     pub registers: Registers,
 }
+
+#[derive(Facet)]
+pub struct S7Jtag {
+    pub device: S7JtagPerDevice,
+    pub slrs: Vec<S7JtagPerSlr>,
 }
 
-// shared with US/UP
 #[derive(Facet)]
-pub struct USJtagPerSlr {
+pub struct S7JtagPerDevice {
     pub idcode: [u8; 4],
     pub usercode: [u8; 4],
-    pub fuse_dna: [u8; 12],
-    pub fuse_key: [u8; 32],
     pub fuse_user: [u8; 4],
-    pub fuse_user_128: [u8; 16],
-    pub fuse_rsa: [u8; 48],
-    pub fuse_sec: [u8; 2],
     pub user1: [u8; 4],
     pub user2: [u8; 4],
     pub user3: [u8; 4],
     pub user4: [u8; 4],
+}
+
+#[derive(Facet)]
+pub struct S7JtagPerSlr {
+    pub cntl: [u8; 2],
+    pub fuse_dna: [u8; 8],
+    pub fuse_key: [u8; 32],
+}
+
+// shared with US/UP
+#[derive(Facet)]
+pub struct USJtag {
+    pub device: USJtagPerDevice,
+    pub slrs: Vec<USJtagPerSlr>,
+}
+
+#[derive(Facet)]
+pub struct USJtagPerDevice {
+    pub idcode: [u8; 4],
+    pub usercode: [u8; 4],
+    pub fuse_user: [u8; 4],
+    pub fuse_user_128: [u8; 4],
+    pub user1: [u8; 4],
+    pub user2: [u8; 4],
+    pub user3: [u8; 4],
+    pub user4: [u8; 4],
+}
+
+#[derive(Facet)]
+pub struct USJtagPerSlr {
+    pub cntl: [u8; 4],
+    pub fuse_dna: [u8; 12],
+    pub fuse_key: [u8; 32],
+    pub fuse_rsa: [u8; 48],
+    pub fuse_sec: [u8; 2],
 }
 
 #[derive(Facet)]
@@ -106,19 +111,19 @@ impl Read for S7 {
         let num_slr = get_num_slr(cont.info());
         let jtag = S7Jtag {
             device: S7JtagPerDevice {
-                cntl: *jtag_register(cont, 0, commands::FUSE_CNTL).await?,
+                idcode: *jtag_duplicated(cont, commands::IDCODE).await?,
+                usercode: *jtag_master(cont, num_slr, commands::USERCODE).await?,
+                fuse_user: *jtag_master(cont, num_slr, commands::FUSE_USER).await?,
+                user1: *jtag_master(cont, num_slr, commands::USER1).await?,
+                user2: *jtag_master(cont, num_slr, commands::USER2).await?,
+                user3: *jtag_master(cont, num_slr, commands::USER3).await?,
+                user4: *jtag_master(cont, num_slr, commands::USER4).await?,
             },
             slrs: read_slrs(num_slr, async |slr| {
                 Ok(S7JtagPerSlr {
-                    idcode: *jtag_register(cont, slr, commands::IDCODE).await?,
-                    usercode: *jtag_register(cont, slr, commands::USERCODE).await?,
-                    fuse_dna: *jtag_register(cont, slr, commands::FUSE_DNA).await?,
-                    fuse_key: *jtag_register(cont, slr, commands::FUSE_KEY).await?,
-                    fuse_user: *jtag_register(cont, slr, commands::FUSE_USER).await?,
-                    user1: *jtag_register(cont, slr, commands::USER1).await?,
-                    user2: *jtag_register(cont, slr, commands::USER2).await?,
-                    user3: *jtag_register(cont, slr, commands::USER3).await?,
-                    user4: *jtag_register(cont, slr, commands::USER4).await?,
+                    cntl: *jtag_shifted(cont, num_slr, 0, commands::FUSE_CNTL).await?,
+                    fuse_dna: *jtag_shifted(cont, num_slr, slr, commands::FUSE_DNA).await?,
+                    fuse_key: *jtag_shifted(cont, num_slr, slr, commands::FUSE_KEY).await?,
                 })
             })
             .await?,
@@ -132,9 +137,7 @@ impl Read for US {
     async fn read(cont: &mut Controller) -> Result<Self> {
         let num_slr = get_num_slr(cont.info());
         let jtag = USJtag {
-            device: USJtagPerDevice {
-                cntl: *jtag_register(cont, 0, commands::FUSE_CNTL).await?,
-            },
+            device: read_us_jtag_device(cont, num_slr).await?,
             slrs: read_us_jtag_per_slr(cont, num_slr).await?,
         };
         let registers = read_registers(cont, num_slr).await?;
@@ -145,10 +148,8 @@ impl Read for US {
 impl Read for UP {
     async fn read(cont: &mut Controller) -> Result<Self> {
         let num_slr = get_num_slr(cont.info());
-        let jtag = UPJtag {
-            device: UPJtagPerDevice {
-                cntl: *jtag_register(cont, 0, commands::FUSE_CNTL).await?,
-            },
+        let jtag = USJtag {
+            device: read_us_jtag_device(cont, num_slr).await?,
             slrs: read_us_jtag_per_slr(cont, num_slr).await?,
         };
         let registers = read_registers(cont, num_slr).await?;
@@ -164,24 +165,30 @@ async fn read_slrs<T>(num_slr: u8, mut f: impl AsyncFnMut(u8) -> Result<T>) -> R
     Ok(ret)
 }
 
+async fn read_us_jtag_device(cont: &mut Controller, num_slr: u8) -> Result<USJtagPerDevice> {
+    Ok(USJtagPerDevice {
+        idcode: *jtag_duplicated(cont, commands::IDCODE).await?,
+        usercode: *jtag_master(cont, num_slr, commands::USERCODE).await?,
+        fuse_user: *jtag_master(cont, num_slr, commands::FUSE_USER).await?,
+        fuse_user_128: *jtag_master(cont, num_slr, commands::FUSE_USER).await?,
+        user1: *jtag_master(cont, num_slr, commands::USER1).await?,
+        user2: *jtag_master(cont, num_slr, commands::USER2).await?,
+        user3: *jtag_master(cont, num_slr, commands::USER3).await?,
+        user4: *jtag_master(cont, num_slr, commands::USER4).await?,
+    })
+}
+
 async fn read_us_jtag_per_slr(
     cont: &mut Controller,
     num_slr: u8,
 ) -> Result<Vec<USJtagPerSlr>, eyre::Error> {
     read_slrs(num_slr, async |slr| {
         Ok(USJtagPerSlr {
-            idcode: *jtag_register(cont, slr, commands::IDCODE).await?,
-            usercode: *jtag_register(cont, slr, commands::USERCODE).await?,
-            fuse_dna: *jtag_register(cont, slr, commands::FUSE_DNA).await?,
-            fuse_key: *jtag_register(cont, slr, commands::FUSE_KEY).await?,
-            fuse_user: *jtag_register(cont, slr, commands::FUSE_USER).await?,
-            fuse_user_128: *jtag_register(cont, slr, commands::FUSE_USER_128).await?,
-            fuse_rsa: *jtag_register(cont, slr, commands::FUSE_RSA).await?,
-            fuse_sec: *jtag_register(cont, slr, commands::FUSE_SEC).await?,
-            user1: *jtag_register(cont, slr, commands::USER1).await?,
-            user2: *jtag_register(cont, slr, commands::USER2).await?,
-            user3: *jtag_register(cont, slr, commands::USER3).await?,
-            user4: *jtag_register(cont, slr, commands::USER4).await?,
+            cntl: *jtag_shifted(cont, num_slr, slr, commands::FUSE_CNTL).await?,
+            fuse_dna: *jtag_shifted(cont, num_slr, slr, commands::FUSE_DNA).await?,
+            fuse_key: *jtag_shifted(cont, num_slr, slr, commands::FUSE_KEY).await?,
+            fuse_rsa: *jtag_shifted(cont, num_slr, slr, commands::FUSE_RSA).await?,
+            fuse_sec: *jtag_shifted(cont, num_slr, slr, commands::FUSE_SEC).await?,
         })
     })
     .await
@@ -210,17 +217,17 @@ async fn read_us_jtag_per_slr(
 async fn read_registers(cont: &mut Controller, num_slr: u8) -> Result<Registers> {
     let slrs = read_slrs(num_slr, async |slr| {
         Ok(RegistersPerSlr {
-            ctl0: device_register(cont, slr, Addr::Ctl0).await?,
-            stat: device_register(cont, slr, Addr::Stat).await?,
-            cor0: device_register(cont, slr, Addr::Cor0).await?,
-            idcode: device_register(cont, slr, Addr::Idcode).await?,
-            axss: device_register(cont, slr, Addr::Axss).await?,
-            cor1: device_register(cont, slr, Addr::Cor1).await?,
-            wbstar: device_register(cont, slr, Addr::Wbstar).await?,
-            timer: device_register(cont, slr, Addr::Timer).await?,
-            bootsts: device_register(cont, slr, Addr::Bootsts).await?,
-            ctl1: device_register(cont, slr, Addr::Ctl1).await?,
-            bspi: device_register(cont, slr, Addr::Bspi).await?,
+            ctl0: device_register(cont, num_slr, slr, Addr::Ctl0).await?,
+            stat: device_register(cont, num_slr, slr, Addr::Stat).await?,
+            cor0: device_register(cont, num_slr, slr, Addr::Cor0).await?,
+            idcode: device_register(cont, num_slr, slr, Addr::Idcode).await?,
+            axss: device_register(cont, num_slr, slr, Addr::Axss).await?,
+            cor1: device_register(cont, num_slr, slr, Addr::Cor1).await?,
+            wbstar: device_register(cont, num_slr, slr, Addr::Wbstar).await?,
+            timer: device_register(cont, num_slr, slr, Addr::Timer).await?,
+            bootsts: device_register(cont, num_slr, slr, Addr::Bootsts).await?,
+            ctl1: device_register(cont, num_slr, slr, Addr::Ctl1).await?,
+            bspi: device_register(cont, num_slr, slr, Addr::Bspi).await?,
         })
     })
     .await?;

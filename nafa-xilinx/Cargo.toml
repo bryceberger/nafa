@@ -16,7 +16,6 @@ facet.workspace = true
 facet-python.workspace = true
 hex.workspace = true
 nafa-io.workspace = true
-nestify = "0.3.3"
 nom = "8"
 smol.workspace = true
 thiserror = "2"
