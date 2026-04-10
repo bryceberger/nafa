@@ -5,16 +5,23 @@ pub const fn duplicated(val: Duplicated) -> u32 {
     val | val << 6 | val << (6 * 2) | val << (6 * 3) | val << (6 * 4) | val << (6 * 5)
 }
 
+const DUPLICATED_SKIP_SLR: u32 = 0b100100
+    | 0b100100 << 6
+    | 0b100100 << (6 * 2)
+    | 0b100100 << (6 * 3)
+    | 0b100100 << (6 * 4)
+    | 0b100100 << (6 * 5);
+
 pub const fn master(val: Master, num_slr: u8) -> u32 {
     let val = val as u8 as u32;
     let shift = (num_slr - 1) * 6;
-    duplicated(ISC_NOOP) & !0b111111 << shift | val << shift
+    DUPLICATED_SKIP_SLR & !(0b111111 << shift) | val << shift
 }
 
 pub const fn shifted(val: Shifted, num_slr: u8, active_slr: u8) -> u32 {
     let val = val as u8 as u32;
     let shift = (num_slr - 1 - active_slr) * 6;
-    duplicated(ISC_NOOP) & !0b111111 << shift | val << shift
+    DUPLICATED_SKIP_SLR & !(0b111111 << shift) | val << shift
 }
 
 #[repr(u8)]
