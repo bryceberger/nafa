@@ -49,8 +49,8 @@ async fn read_device_register_word(
     addr: Addr,
 ) -> Result<u32> {
     let data = read_device_register_sized(cont, num_slr, active_slr, addr).await?;
-    let data = data.map(|x| x.reverse_bits());
-    Ok(u32::from_be_bytes(data))
+    let data = u32::from_le_bytes(*data).reverse_bits();
+    Ok(data)
 }
 
 async fn read_device_register_sized<const N: usize>(
@@ -127,19 +127,14 @@ pub async fn read_xadc(
 }
 
 bitflags! {
-    struct Status: u32 {
-        const INIT_COMPLETE = 0x0800;
-        const DONE          = 0x2000;
-    }
-}
-
-async fn is_done_status(cont: &mut Controller, num_slr: u8) -> Option<Status> {
-    match read_device_register_word(cont, num_slr, 0, Addr::Stat).await {
-        Ok(s) => {
-            let s = Status::from_bits_retain(s);
-            s.intersects(Status::INIT_COMPLETE).then_some(s)
-        }
-        _ => None,
+    // note: these bits are reversed from what you might expect reading a BSDL
+    // file. This is due to bit 0 being shifted out first, thus ending up on the
+    // left-most, thus being the MSB instead of LSB.
+    struct IRCapture: u8 {
+        const DONE        = 0b000001;
+        const INIT        = 0b000010;
+        const ISC_ENABLED = 0b000100;
+        const ISC_DONE    = 0b001000;
     }
 }
 
@@ -161,7 +156,10 @@ pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats>
     cont.run([Command::ir(duplicated(commands::JPROGRAM))])
         .await?;
 
-    while is_done_status(cont, num_slr).await.is_none() {}
+    while {
+        let ir_capture = IRCapture::from_bits_retain(cont.capture_ir().await? as _);
+        !ir_capture.intersects(IRCapture::INIT)
+    } {}
     let end_shutdown = Instant::now();
 
     cont.run([
@@ -169,6 +167,7 @@ pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats>
         Command::ir(shifted(commands::CFG_IN, num_slr, 0)),
         Command::dr_tx_with_notification(data),
         Command::ir(duplicated(commands::JSTART)),
+        Command::idle(Bytes(250)),
     ])
     .await?;
     let end_program = Instant::now();
@@ -183,11 +182,16 @@ pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats>
     });
     let status = async {
         loop {
-            match is_done_status(cont, num_slr).await {
-                Some(x) if x.contains(Status::DONE) => break true,
-                Some(_) => break false,
-                None => {}
-            }
+            // Sometimes, immediately after programming, the FPGA won't respond
+            // for a few ms. This surfaces as a "failed to fill buffer", which
+            // we ignore in favor of just trying again.
+            //
+            // Infinite loop is negated by timeout above.
+            let Ok(ir) = cont.capture_ir().await else {
+                continue;
+            };
+            let ir_capture = IRCapture::from_bits_retain(ir as _);
+            break ir_capture.intersects(IRCapture::DONE);
         }
     };
     let success = status.or(timeout).await;
