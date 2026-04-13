@@ -21,10 +21,17 @@ pub async fn run(
     }
 
     let stats = nafa_xilinx::_32bit::program(cont, &data).await?;
+
+    let digits = as_millis(stats.time_program)
+        .max(as_millis(stats.time_shutdown))
+        .max(as_millis(stats.time_verify))
+        .log10()
+        .ceil() as usize;
+    let width = digits + 4;
     Ok(Some(Box::new(move || {
-        println!("shutdown: {:>7.3}ms", as_millis(stats.time_shutdown));
-        println!(" program: {:>7.3}ms", as_millis(stats.time_program));
-        println!("  verify: {:>7.3}ms", as_millis(stats.time_verify));
+        println!("shutdown: {:>width$.3}ms", as_millis(stats.time_shutdown));
+        println!(" program: {:>width$.3}ms", as_millis(stats.time_program));
+        println!("  verify: {:>width$.3}ms", as_millis(stats.time_verify));
         println!(" success: {}", stats.success);
     })))
 }
