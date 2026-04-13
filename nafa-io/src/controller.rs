@@ -425,6 +425,32 @@ impl Controller {
         backend.flush(buf).await?;
         Ok(&self.buf)
     }
+
+    pub async fn capture_ir(&mut self) -> Result<u32> {
+        let irlen_before: u8 = self.before.iter().map(|i| i.1.irlen.0).sum();
+        let irlen = self.info().irlen.0;
+
+        let p0 = Some(PATHS[State::RunTestIdle][State::ShiftIR]);
+        let p1 = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
+        let data = Data::TxRx(&[0xff; 32]);
+        self.buf.clear();
+        self.backend.bytes(&mut self.buf, p0, data, p1).await?;
+        self.backend.flush(&mut self.buf).await?;
+
+        // TODO: This works correctly for FTDI chips. Do other backends (XPC,
+        // USB-Blaster) do the same?
+        for byte in &mut self.buf {
+            *byte = byte.reverse_bits();
+        }
+
+        let mut reader = bitreader::BitReader::new(&self.buf);
+        let mut to_skip = irlen_before;
+        while to_skip != 0 {
+            reader.read_u64(to_skip.min(64))?;
+            to_skip = to_skip.saturating_sub(64);
+        }
+        Ok(reader.read_u32(irlen)?)
+    }
 }
 
 #[derive(Clone, Copy)]
