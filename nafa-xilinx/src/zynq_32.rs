@@ -18,10 +18,7 @@ use crate::_32bit::{
 pub mod commands;
 pub mod info;
 
-pub async fn read_device_register(
-    cont: &mut Controller,
-    reg: Type1,
-) -> Result<&[u8]> {
+pub async fn read_device_register(cont: &mut Controller, reg: Type1) -> Result<&[u8]> {
     let tiny_bitstream =
         bitstream_to_wire_order([Type1::SYNC, Type1::NOOP, reg.to_raw(), Type1::NOOP, Type1::NOOP]);
     let tiny_bitstream = tiny_bitstream.as_flattened();
@@ -55,11 +52,7 @@ async fn read_device_register_sized<const N: usize>(
         })
 }
 
-async fn read_jtag_register(
-    cont: &mut Controller,
-    inst: u32,
-    len: Bytes<usize>,
-) -> Result<&[u8]> {
+async fn read_jtag_register(cont: &mut Controller, inst: u32, len: Bytes<usize>) -> Result<&[u8]> {
     cont.run([Command::ir(inst), Command::dr_rx(len)]).await
 }
 

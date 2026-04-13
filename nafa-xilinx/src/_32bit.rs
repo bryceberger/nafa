@@ -5,7 +5,8 @@ use std::{
 
 use bitflags::bitflags;
 use eyre::Result;
-use nafa_io::{Command, Controller,
+use nafa_io::{
+    Command, Controller,
     units::{Bytes, Words32},
 };
 use smol::future::FutureExt;
