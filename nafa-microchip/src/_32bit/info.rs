@@ -3,7 +3,7 @@ use facet::Facet;
 use nafa_io::Controller;
 
 use super::commands;
-use crate::{_32bit::read_jtag, Read};
+use crate::{_32bit::read_jtag_simple, Read};
 
 #[derive(Facet)]
 pub struct PF {
@@ -44,9 +44,9 @@ impl Read for PF {
 
 async fn read_pf_jtag_device(cont: &mut Controller) -> Result<PF> {
     Ok(PF {
-        idcode: *read_jtag(cont, commands::IDCODE).await?,
+        idcode: *read_jtag_simple(cont, commands::IDCODE, 4).await?,
         udv: [0; 4],
-        silsig: [0; 4],
+        silsig: *read_jtag_simple(cont, commands::SILSIG, 4).await?,
         checksum: [0; 2],
         read_design_info: [0; 36],
         designver: [0; 2],

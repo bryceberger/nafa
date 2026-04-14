@@ -5,4 +5,6 @@ pub use self::Cmd::*;
 #[rustfmt::skip]
 pub enum Cmd {
     IDCODE       = 0b00001111,
+    SILSIG       = 0b00001110,
+    DSN          = 0b11110000,
 }
