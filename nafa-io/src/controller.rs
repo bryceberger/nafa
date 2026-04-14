@@ -331,6 +331,10 @@ impl Controller {
         }
     }
 
+    pub fn backend(&mut self) -> (&mut ScratchBuffer, &mut dyn Backend) {
+        (&mut self.buf, &mut self.backend)
+    }
+
     pub fn info(&self) -> &DeviceInfo {
         &self.active.1
     }
@@ -458,6 +462,12 @@ impl Controller {
 
         backend.flush(buf).await?;
         Ok(self.buf.data())
+    }
+
+    pub async fn reset(&mut self) -> Result<()> {
+        self.buf.clear();
+        self.backend.tms(&mut self.buf, Path::IDLE).await?;
+        Ok(())
     }
 
     pub async fn capture_ir(&mut self) -> Result<u32> {

@@ -1,3 +1,4 @@
+use eyre::Result;
 use nafa_io::Controller;
 use nafa_microchip::read;
 

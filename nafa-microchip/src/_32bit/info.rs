@@ -32,7 +32,7 @@ pub struct PF {
     pub debug_info: [u8; 84],
     pub dsn: [u8; 16],
     pub query_security: [u8; 9],
-    pub factory_integrity_bits: [u8; 32],
+    pub device_integrity_bits: [u8; 32],
 }
 
 impl Read for PF {
@@ -46,7 +46,7 @@ async fn read_pf_jtag_device(cont: &mut Controller) -> Result<PF> {
     Ok(PF {
         idcode: *read_jtag_simple(cont, commands::IDCODE, 4).await?,
         udv: [0; 4],
-        silsig: *read_jtag_simple(cont, commands::SILSIG, 4).await?,
+        silsig: [0; 4],
         checksum: [0; 2],
         read_design_info: [0; 36],
         designver: [0; 2],
@@ -67,6 +67,6 @@ async fn read_pf_jtag_device(cont: &mut Controller) -> Result<PF> {
         debug_info: [0; 84],
         dsn: [0; 16],
         query_security: [0; 9],
-        factory_integrity_bits: [0; 32],
+        device_integrity_bits: [0; 32],
     })
 }

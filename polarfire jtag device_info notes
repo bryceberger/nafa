@@ -14,6 +14,7 @@ Die Revision: 5
 Die Firmware Version: 3.19
 
 //Will send 0xCD until it first bit of recieved data is not one, then it will move onto the next command
+// There isn't much information on what this is. This articale exists, but it doesn't help: https://support.microchip.com/s/article/Understanding-EXPORT-UDV-32--in-DEVICE-INFO-log
 EXPORT UDV[32] = 63510313
 
 EXPORT SILSIG[32] = 00000000
@@ -28,9 +29,15 @@ EXPORT READ_DESIGN_INFO: [288] = 00000000000000000000000000000000000000000000000
 
 EXPORT DESIGNVER[16] = 0000
 EXPORT BACKLEVEL[16] = 0000
-Reading digests for all the segments from the device...
 
+Reading digests for all the segments from the device...
 // Post 0xA3 commands - 0xF2 address increments by 2 for each half
+// In PolarFire®, digests are used to protect the integrity of the user design programmed into the
+// device as well as the programming files used for device programming. Digests are the result of
+// the SHA-256 hash executed over the programmed device content. The resulting digest value is 
+// highly dependent on the device programming information and can be used with high confidence to
+// determine a change in the content  programmed into the device.
+// Info: https://onlinedocs.microchip.com/oxy/GUID-DF33D7C4-5604-4C6B-92AF-8C864323C016-en-US-14/GUID-50C3898F-EDDC-43BC-88FA-4711A30B31B6.html
 EXPORT CHECK FABRIC digest[256] = ce9bc81ad8075dee55230ac3060a6ac298c0f7144c6767e17f574d124a418982
 EXPORT CC digest[256] = 318dae34366d3485ccbb38da10cba21e12dad9ce40b6433c83a8015bead2015e
 EXPORT SNVM digest[256] = 57e24b6794c755a29e0e4cb2fa4b6bad6d916e1843387a0996393e09e0a950ed
