@@ -99,7 +99,11 @@ async fn async_main(Args { global, command }: Args) -> Result<()> {
         let notify = AtomicUsize::new(0);
         let pb = setup_progress_bar();
         let progress = smol::future::poll_fn(|_| {
-            pb.set_position(notify.load(Ordering::Acquire) as _);
+            let pos = notify.load(Ordering::Acquire);
+            if pos == 0 {
+                pb.reset_elapsed();
+            }
+            pb.set_position(pos as _);
             std::task::Poll::Pending
         });
         cont.with_notifications(&notify, async |cont| run(cont, Some(&pb), command).await)
