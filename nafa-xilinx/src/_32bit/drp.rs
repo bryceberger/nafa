@@ -299,7 +299,7 @@ pub fn temperature(family: Family) -> Transfer {
             |d| linear_scale_10(d, -279.4266, 507.5921 / _2_10), // sysmone4, external ref
             |d| linear_scale_10(d, -280.2309, 509.3141 / _2_10), // sysmone4, internal ref
         ]),
-        Family::Z7 | Family::Versal => Transfer::Unknown,
+        Family::Z7 => Transfer::Unknown,
     }
 }
 
@@ -307,7 +307,7 @@ pub fn power_supply(family: Family) -> Transfer {
     match family {
         Family::S7 => Transfer::Exactly(power_supply_s7),
         Family::US | Family::UP | Family::ZP => Transfer::Exactly(power_supply_us),
-        Family::Z7 | Family::Versal => Transfer::Unknown,
+        Family::Z7 => Transfer::Unknown,
     }
 }
 
@@ -315,7 +315,7 @@ pub fn adc(family: Family) -> Transfer {
     match family {
         Family::S7 => Transfer::OneOf(&[adc_unipolar_s7, adc_bipolar_s7]),
         Family::US | Family::UP | Family::ZP => Transfer::OneOf(&[adc_unipolar_us, adc_bipolar_us]),
-        Family::Z7 | Family::Versal => Transfer::Unknown,
+        Family::Z7 => Transfer::Unknown,
     }
 }
 
