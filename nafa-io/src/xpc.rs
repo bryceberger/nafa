@@ -403,7 +403,7 @@ impl Backend for Device {
 
         let buf = match self.cmd_read_len {
             0 => None,
-            _ => Some(buf.extend(self.cmd_read_len)),
+            _ => Some(buf.extend(self.cmd_read_len, 0)),
         };
         let in_bits = (self.cmd_buf.len() - 2) / 2 * 4 + usize::from(self.num_bits);
         let in_bits = in_bits.try_into().unwrap();

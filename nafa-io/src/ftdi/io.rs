@@ -135,7 +135,14 @@ impl Device {
             }
             for packet in read_buffer[..bytes_read].chunks(self.packet_size) {
                 let data = &packet[2..];
-                let (first, rest) = buf.split_at_mut(data.len());
+                let buf_len = buf.len();
+                let Some((first, rest)) = buf.split_at_mut_checked(data.len()) else {
+                    return Err(eyre::eyre!(
+                        "too much data for buffer: read {} bytes, expected {}",
+                        data.len(),
+                        buf_len,
+                    ));
+                };
                 first.copy_from_slice(data);
                 actual_bytes_read += data.len();
                 buf = rest;

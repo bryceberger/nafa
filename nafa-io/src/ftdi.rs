@@ -2,7 +2,7 @@ use eyre::Result;
 use tracing::{debug, instrument};
 
 use crate::{
-    Backend, Buffer,
+    Backend, Buffer, ScratchBuffer,
     backend::Data,
     jtag,
     units::{Bits, Bytes},
@@ -14,7 +14,13 @@ mod io;
 pub struct Device {
     dev: io::Device,
     cmd_buf: Vec<u8>,
-    cmd_read_len: usize,
+    reads: Vec<Read>,
+}
+
+#[derive(Clone, Copy)]
+enum Read {
+    Bytes(usize),
+    ExtraBit,
 }
 
 #[instrument(skip_all)]
@@ -50,16 +56,16 @@ impl Device {
         let mut me = Self {
             dev,
             cmd_buf: Vec::new(),
-            cmd_read_len: 0,
+            reads: Vec::new(),
         };
-        let buf = &mut Vec::new();
+        let buf = &mut ScratchBuffer::new();
         me.tms(buf, jtag::Path::RESET).await?;
         let before = Some(jtag::PATHS[jtag::State::TestLogicReset][jtag::State::ShiftDR]);
         let after = Some(jtag::PATHS[jtag::State::ShiftDR][jtag::State::RunTestIdle]);
         me.bytes(buf, before, Data::Rx(Bytes(4)), after).await?;
         me.flush(buf).await?;
 
-        let ([idcode], []) = buf.as_chunks() else {
+        let ([idcode], []) = buf.data().as_chunks() else {
             return Err(eyre::eyre!("failed to fill buffer"));
         };
         if u32::from_le_bytes(*idcode) == 0xffffffff {
@@ -137,10 +143,27 @@ const MAX_READ_WRITE_LEN: usize = u16::MAX as usize + 1;
 impl Device {
     async fn maybe_flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
         const MAX_CMD_LEN: usize = MAX_READ_WRITE_LEN;
-        if self.cmd_buf.len() >= MAX_CMD_LEN || self.cmd_read_len >= MAX_READ_WRITE_LEN {
+        let read_len = self.read_buf_required();
+        if self.cmd_buf.len() >= MAX_CMD_LEN || read_len >= MAX_READ_WRITE_LEN {
             self.flush(buf).await?;
         }
         Ok(())
+    }
+
+    fn read_buf_required(&self) -> usize {
+        let f = |&x| match x {
+            Read::Bytes(n) => n,
+            Read::ExtraBit => 1,
+        };
+        self.reads.iter().map(f).sum()
+    }
+
+    fn read_len(&self) -> usize {
+        let f = |&x| match x {
+            Read::Bytes(n) => n,
+            Read::ExtraBit => 0,
+        };
+        self.reads.iter().map(f).sum()
     }
 
     async fn tms_internal(
@@ -148,15 +171,29 @@ impl Device {
         buf: &mut dyn Buffer,
         path: jtag::Path,
         tdi: bool,
+        read_first_bit: bool,
     ) -> Result<()> {
         debug!(%path, tdi);
 
         let tdi = if tdi { 0x80 } else { 0x00 };
         let flags = WRITE_TMS | LSB | BITMODE | WRITE_NEG;
 
-        self.cmd_buf.push(flags);
-        self.cmd_buf.push(path.len - 1);
-        self.cmd_buf.push(tdi | path.as_clocked());
+        if read_first_bit {
+            self.reads.push(Read::ExtraBit);
+            self.cmd_buf.push(flags | DO_READ | READ_NEG);
+            self.cmd_buf.push(0);
+            self.cmd_buf.push(tdi | path.as_clocked());
+
+            if path.len != 1 {
+                self.cmd_buf.push(flags);
+                self.cmd_buf.push(path.len - 1 - 1);
+                self.cmd_buf.push(tdi | path.as_clocked() >> 1);
+            }
+        } else {
+            self.cmd_buf.push(flags);
+            self.cmd_buf.push(path.len - 1);
+            self.cmd_buf.push(tdi | path.as_clocked());
+        }
 
         self.maybe_flush(buf).await
     }
@@ -174,7 +211,7 @@ static ZEROES: &[u8; MAX_READ_WRITE_LEN] = &[0x00; MAX_READ_WRITE_LEN];
 impl Backend for Device {
     #[instrument(skip_all)]
     async fn tms(&mut self, buf: &mut dyn Buffer, path: jtag::Path) -> Result<()> {
-        self.tms_internal(buf, path, true).await
+        self.tms_internal(buf, path, true, false).await
     }
 
     #[instrument(skip_all)]
@@ -186,16 +223,17 @@ impl Backend for Device {
         after: Option<jtag::Path>,
     ) -> Result<()> {
         if let Some(path) = before {
-            self.tms_internal(buf, path, true).await?;
+            self.tms_internal(buf, path, true, false).await?;
         }
 
         let mut last_bit = true;
+        let mut read_last_bit = false;
 
         match data {
             Data::Tx(tdi) | Data::TxRx(tdi) => {
                 let read = matches!(data, Data::TxRx(_));
                 let read_cmd = if read { DO_READ | READ_NEG } else { 0 };
-                let cmd = read_cmd | DO_WRITE | LSB | WRITE_NEG;
+                let cmd = read_cmd | DO_WRITE | LSB;
 
                 let (tdi, last) = match (after, tdi.split_last()) {
                     (Some(_), Some((l, data))) => (data, Some(*l)),
@@ -205,7 +243,7 @@ impl Backend for Device {
 
                 for chunk in tdi.chunks(MAX_READ_WRITE_LEN) {
                     if read {
-                        self.cmd_read_len += chunk.len();
+                        self.reads.push(Read::Bytes(chunk.len()));
                     }
                     let len = assert_data_len(chunk.len());
                     self.cmd_buf.push(cmd);
@@ -217,28 +255,45 @@ impl Backend for Device {
                 }
 
                 if let Some(last) = last {
+                    if read {
+                        self.reads.push(Read::Bytes(1));
+                        read_last_bit = true;
+                    }
                     self.cmd_buf.push(cmd | BITMODE);
                     // 7 bits, tx last bit as part of tms
                     self.cmd_buf.push(6);
                     self.cmd_buf.push(last);
-                    if read {
-                        self.cmd_read_len += 1;
-                    }
                     buf.notify_write(1);
                     last_bit = last & 0x80 != 0;
                 }
             }
             Data::Rx(Bytes(mut len)) => {
                 while len != 0 {
-                    let to_add = len.min(MAX_READ_WRITE_LEN);
-                    self.cmd_read_len += to_add;
-                    let read_len = assert_data_len(to_add);
-
-                    self.cmd_buf.push(DO_READ | LSB | READ_NEG);
-                    self.cmd_buf.push(read_len as u8);
-                    self.cmd_buf.push((read_len >> 8) as u8);
-
+                    let mut to_add = len.min(MAX_READ_WRITE_LEN);
                     len = len.saturating_sub(MAX_READ_WRITE_LEN);
+                    let last = len == 0;
+                    if last {
+                        to_add -= 1;
+                    }
+
+                    let cmd = DO_READ | LSB | READ_NEG;
+                    if to_add != 0 {
+                        self.reads.push(Read::Bytes(to_add));
+                        let read_len = assert_data_len(to_add);
+
+                        self.cmd_buf.push(cmd);
+                        self.cmd_buf.push(read_len as u8);
+                        self.cmd_buf.push((read_len >> 8) as u8);
+                    }
+
+                    if last {
+                        self.reads.push(Read::Bytes(1));
+                        self.cmd_buf.push(cmd | BITMODE);
+                        // 7 bits, rx last bit as part of tms
+                        self.cmd_buf.push(6);
+                        read_last_bit = true;
+                    }
+
                     self.maybe_flush(buf).await?;
                 }
             }
@@ -264,7 +319,8 @@ impl Backend for Device {
         };
 
         if let Some(path) = after {
-            self.tms_internal(buf, path, last_bit).await?;
+            self.tms_internal(buf, path, last_bit, read_last_bit)
+                .await?;
         }
 
         self.maybe_flush(buf).await?;
@@ -281,7 +337,7 @@ impl Backend for Device {
         after: Option<jtag::Path>,
     ) -> Result<()> {
         if let Some(path) = before {
-            self.tms_internal(buf, path, true).await?;
+            self.tms_internal(buf, path, true, false).await?;
         }
 
         let mut len = match after {
@@ -300,7 +356,7 @@ impl Backend for Device {
         }
 
         if let Some(path) = after {
-            self.tms_internal(buf, path, data & 1 == 1).await?;
+            self.tms_internal(buf, path, data & 1 == 1, false).await?;
         }
 
         self.maybe_flush(buf).await?;
@@ -310,18 +366,43 @@ impl Backend for Device {
     #[instrument(skip_all)]
     async fn flush(&mut self, buf: &mut dyn Buffer) -> Result<()> {
         self.cmd_buf.push(MpsseCommand::SendImmediate as u8);
+        let read_len = self.read_len();
         debug!(
             write_len = self.cmd_buf.len(),
-            read_len = self.cmd_read_len,
+            read_len,
             data = %crate::ShortHex(&self.cmd_buf),
         );
 
-        let buf = buf.extend(self.cmd_read_len);
-        xfer(&mut self.dev, &self.cmd_buf, buf).await?;
+        let scratch = self.read_buf_required() - read_len;
+
+        let buf = buf.extend(read_len, scratch);
+        if let Err(e) = xfer(&mut self.dev, &self.cmd_buf, buf).await {
+            self.cmd_buf.clear();
+            self.reads.clear();
+            return Err(e);
+        }
+        shift_reads(buf, &self.reads);
 
         self.cmd_buf.clear();
-        self.cmd_read_len = 0;
+        self.reads.clear();
         Ok(())
+    }
+}
+
+fn shift_reads(mut buf: &mut [u8], reads: &[Read]) {
+    let mut last_byte = &mut 0;
+    for r in reads {
+        match r {
+            Read::Bytes(n) => {
+                let (chunk, rest) = buf.split_at_mut(*n);
+                last_byte = &mut chunk[chunk.len() - 1];
+                buf = rest;
+            }
+            Read::ExtraBit => {
+                *last_byte = buf[0];
+                buf = &mut buf[1..];
+            }
+        }
     }
 }
 

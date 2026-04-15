@@ -237,8 +237,9 @@ impl Backend for Device {
         });
         let total_read_len: usize = it.sum();
 
-        let buf = buf.extend(total_read_len);
+        let buf = buf.extend(total_read_len, 0);
         self.dev.write(&self.cmd_buf).await?;
+        // TODO: can this be better now that `Buffer` has the scratch param?
         self.dev
             .do_reads(buf, self.read_buf.iter().copied())
             .await?;

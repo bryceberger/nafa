@@ -7,7 +7,7 @@ use color_eyre::{Section as _, SectionExt as _};
 use eyre::{Result, eyre};
 
 use crate::{
-    Backend, Buffer,
+    Backend, Buffer, ScratchBuffer, ShortHex,
     backend::Data,
     devices::DeviceInfo,
     jtag::{IdCode, PATHS, Path, State},
@@ -37,7 +37,7 @@ pub struct Controller {
     active: (IdCode, DeviceInfo),
     after: Vec<(IdCode, DeviceInfo)>,
     notify: Ptr<AtomicUsize>,
-    buf: Vec<u8>,
+    buf: ScratchBuffer,
 }
 
 fn max_possible_combined_irlen(ircapture: &[u8]) -> Bits<usize> {
@@ -140,7 +140,7 @@ pub async fn detect_chain(
     backend: &mut dyn Backend,
     devices: &HashMap<IdCode, DeviceInfo>,
 ) -> Result<Vec<(IdCode, DeviceInfo)>> {
-    let buf = &mut Vec::new();
+    let buf = &mut ScratchBuffer::new();
 
     let to_sir = Some(PATHS[State::TestLogicReset][State::ShiftIR]);
     let to_reset = Some(PATHS[State::ShiftIR][State::TestLogicReset]);
@@ -148,7 +148,7 @@ pub async fn detect_chain(
     backend.tms(buf, Path::RESET).await?;
     backend.bytes(buf, to_sir, capture, to_reset).await?;
     backend.flush(buf).await?;
-    tracing::info!(capture = %crate::ShortHex(buf), maybe_irlen = ?max_possible_combined_irlen(buf));
+    tracing::info!(capture = %ShortHex(buf.data()), maybe_irlen = ?max_possible_combined_irlen(buf.data()));
     buf.clear();
 
     let reset_to_idle = PATHS[State::TestLogicReset][State::RunTestIdle];
@@ -166,14 +166,14 @@ pub async fn detect_chain(
         backend.bytes(buf, idle_to_sdr, rx, sdr_to_idle).await?;
         backend.flush(buf).await?;
 
-        let (ids, []) = buf.as_chunks() else {
+        let (ids, []) = buf.data().as_chunks() else {
             return Err(eyre!(
                 "failed to fill idcode, or returned extra data: {}",
-                crate::ShortHex(buf),
+                ShortHex(buf.data()),
             ));
         };
         let id = ids[ret.len()];
-        tracing::info!(id = %crate::ShortHex(&id));
+        tracing::info!(id = %ShortHex(&id));
         match u32::from_le_bytes(id) {
             // reached end of chain
             0xffff_ffff => {
@@ -219,7 +219,10 @@ pub async fn detect_chain(
 }
 
 #[tracing::instrument(skip_all)]
-async fn zynq_us_init_arm_dap(backend: &mut dyn Backend, buf: &mut Vec<u8>) -> Result<IdCode> {
+async fn zynq_us_init_arm_dap(
+    backend: &mut dyn Backend,
+    buf: &mut ScratchBuffer,
+) -> Result<IdCode> {
     let reset_to_sir = Some(PATHS[State::TestLogicReset][State::ShiftIR]);
     let sir_to_idle = Some(PATHS[State::ShiftIR][State::RunTestIdle]);
     let idle_to_sdr = Some(PATHS[State::RunTestIdle][State::ShiftDR]);
@@ -243,7 +246,7 @@ async fn zynq_us_init_arm_dap(backend: &mut dyn Backend, buf: &mut Vec<u8>) -> R
     backend.bytes(buf, reset_to_sdr, rx_4, sdr_to_idle).await?;
     backend.flush(buf).await?;
 
-    let ([id], []) = buf.as_chunks() else {
+    let ([id], []) = buf.data().as_chunks() else {
         return Err(eyre!("failed to get idcode after zynq us special case"));
     };
     match u32::from_le_bytes(*id) {
@@ -280,7 +283,7 @@ impl Controller {
         active: (IdCode, DeviceInfo),
         after: Vec<(IdCode, DeviceInfo)>,
     ) -> Result<Self> {
-        let mut buf = Vec::new();
+        let mut buf = ScratchBuffer::new();
         let reset_to_idle = PATHS[State::TestLogicReset][State::RunTestIdle];
         backend.tms(&mut buf, Path::RESET).await?;
         backend.tms(&mut buf, reset_to_idle).await?;
@@ -423,7 +426,7 @@ impl Controller {
         };
 
         backend.flush(buf).await?;
-        Ok(&self.buf)
+        Ok(self.buf.data())
     }
 
     pub async fn capture_ir(&mut self) -> Result<u32> {
@@ -439,11 +442,11 @@ impl Controller {
 
         // TODO: This works correctly for FTDI chips. Do other backends (XPC,
         // USB-Blaster) do the same?
-        for byte in &mut self.buf {
+        for byte in self.buf.data_mut() {
             *byte = byte.reverse_bits();
         }
 
-        let mut reader = bitreader::BitReader::new(&self.buf);
+        let mut reader = bitreader::BitReader::new(self.buf.data());
         let mut to_skip = irlen_before;
         while to_skip != 0 {
             reader.read_u64(to_skip.min(64))?;
@@ -610,13 +613,13 @@ async fn io_bytes(
 
 struct NoisyBuffer<'d> {
     notify: &'d AtomicUsize,
-    buf: &'d mut Vec<u8>,
+    buf: &'d mut ScratchBuffer,
 }
 
 impl Buffer for NoisyBuffer<'_> {
-    fn extend(&mut self, size: usize) -> &mut [u8] {
+    fn extend(&mut self, size: usize, scratch: usize) -> &mut [u8] {
         self.notify.fetch_add(size, Ordering::Relaxed);
-        Buffer::extend(self.buf, size)
+        Buffer::extend(self.buf, size, scratch)
     }
 
     fn notify_write(&mut self, size: usize) {

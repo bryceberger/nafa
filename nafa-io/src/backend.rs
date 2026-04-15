@@ -59,8 +59,11 @@ pub trait Backend: Send {
 
 pub trait Buffer: Send {
     /// Extend the buffer, returning a mutable slice to the newly-allocated
-    /// memory
-    fn extend(&mut self, size: usize) -> &mut [u8];
+    /// memory.
+    ///
+    /// The returned buffer will be of length `size + scratch`. `size` is the
+    /// final data length, while `scratch` is extra space required for reading.
+    fn extend(&mut self, size: usize, scratch: usize) -> &mut [u8];
 
     /// Notify that `size` bytes were written. Used for progress bars.
     #[expect(unused)]
@@ -99,10 +102,40 @@ impl<B: Backend + ?Sized + Send> Backend for Box<B> {
     }
 }
 
-impl Buffer for Vec<u8> {
-    fn extend(&mut self, size: usize) -> &mut [u8] {
-        let len = self.len();
-        self.resize(len + size, 0);
-        &mut self[len..]
+pub struct ScratchBuffer {
+    data: Vec<u8>,
+    scratch: usize,
+}
+
+impl ScratchBuffer {
+    pub fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            scratch: 0,
+        }
+    }
+
+    pub fn data(&self) -> &[u8] {
+        let len = self.data.len() - self.scratch;
+        &self.data[..len]
+    }
+
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        let len = self.data.len() - self.scratch;
+        &mut self.data[..len]
+    }
+
+    pub fn clear(&mut self) {
+        self.data.clear();
+        self.scratch = 0;
+    }
+}
+
+impl Buffer for ScratchBuffer {
+    fn extend(&mut self, size: usize, scratch: usize) -> &mut [u8] {
+        let len = self.data.len() - self.scratch;
+        self.scratch = self.scratch.max(scratch);
+        self.data.resize(len + size + self.scratch, 0);
+        &mut self.data[len..]
     }
 }
