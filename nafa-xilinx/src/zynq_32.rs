@@ -11,7 +11,7 @@ use nafa_io::{
 };
 
 use crate::_32bit::{
-    bitstream_to_wire_order,
+    bitstream_to_wire_order, from_wire_order,
     registers::{Addr, OpCode, Type1},
 };
 
@@ -34,8 +34,8 @@ pub async fn read_device_register(cont: &mut Controller, reg: Type1) -> Result<&
 
 async fn read_device_register_word(cont: &mut Controller, addr: Addr) -> Result<u32> {
     let data = read_device_register_sized(cont, addr).await?;
-    let data = data.map(|x| x.reverse_bits());
-    Ok(u32::from_be_bytes(data))
+    let data = from_wire_order(*data);
+    Ok(data)
 }
 
 async fn read_device_register_sized<const N: usize>(

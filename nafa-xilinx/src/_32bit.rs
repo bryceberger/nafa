@@ -50,7 +50,7 @@ async fn read_device_register_word(
     addr: Addr,
 ) -> Result<u32> {
     let data = read_device_register_sized(cont, num_slr, active_slr, addr).await?;
-    let data = u32::from_le_bytes(*data).reverse_bits();
+    let data = from_wire_order(*data);
     Ok(data)
 }
 
@@ -247,6 +247,14 @@ pub async fn readback(cont: &mut Controller, len: Bytes<usize>) -> Result<&[u8]>
     cont.run(commands).await
 }
 
+pub const fn to_wire_order(x: u32) -> [u8; 4] {
+    x.reverse_bits().to_le_bytes()
+}
+
+pub const fn from_wire_order(x: [u8; 4]) -> u32 {
+    u32::from_le_bytes(x).reverse_bits()
+}
+
 pub(crate) fn bitstream_to_wire_order<const N: usize>(x: [u32; N]) -> [[u8; 4]; N] {
-    x.map(|x| x.to_be_bytes().map(u8::reverse_bits))
+    x.map(to_wire_order)
 }
