@@ -1,7 +1,4 @@
-use std::{
-    task::Poll,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use bitflags::bitflags;
 use eyre::Result;
@@ -173,14 +170,6 @@ pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats>
     .await?;
     let end_program = Instant::now();
 
-    let stop = end_program + Duration::from_millis(100);
-    let timeout = smol::future::poll_fn(move |_| {
-        if Instant::now() < stop {
-            Poll::Pending
-        } else {
-            Poll::Ready(false)
-        }
-    });
     let status = async {
         loop {
             // Sometimes, immediately after programming, the FPGA won't respond
@@ -195,7 +184,9 @@ pub async fn program(cont: &mut Controller, data: &[u8]) -> Result<ProgramStats>
             break ir_capture.intersects(IRCapture::DONE);
         }
     };
-    let success = status.or(timeout).await;
+    let success = status
+        .or(nafa_io::timeout(Duration::from_millis(100), false))
+        .await;
     let end_status = Instant::now();
 
     Ok(ProgramStats {
