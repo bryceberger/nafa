@@ -1,5 +1,5 @@
-use eyre::Result;
-use nafa_io::{Command, Controller, ShortHex, units::Bytes};
+use nafa_io::Controller;
+use nafa_microchip::read;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -7,11 +7,18 @@ pub struct Args {
     pub pretty: bool,
 }
 
-pub async fn run(cont: &mut Controller, _: Args) -> Result<()> {
-    let data = cont
-        .run([Command::ir(0x0F), Command::dr_rx(Bytes(4))])
-        .await?;
-    println!("{data:02X?}");
-    println!("{}", ShortHex(data));
-    Ok(())
+pub async fn run(cont: &mut Controller, args: Args) -> Result<(), eyre::Error> {
+    use facet_pretty::FacetPretty;
+
+    fn print<'a, F: facet::Facet<'a>>(info: F, pretty: bool) -> Result<(), eyre::Error> {
+        if pretty {
+            println!("{}", info.pretty());
+        } else {
+            facet_json::to_writer_std(std::io::stdout(), &info)?;
+        }
+        Ok(())
+    }
+
+    let info = read(cont).await?;
+    print(info, args.pretty)
 }
