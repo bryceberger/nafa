@@ -131,11 +131,17 @@ impl ScratchBuffer {
     }
 }
 
+impl Default for ScratchBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Buffer for ScratchBuffer {
     fn extend(&mut self, size: usize, scratch: usize) -> &mut [u8] {
         let len = self.data.len() - self.scratch;
-        self.scratch = self.scratch.max(scratch);
-        self.data.resize(len + size + self.scratch, 0);
+        self.data.resize(len + size + scratch, 0);
+        self.scratch = scratch;
         &mut self.data[len..]
     }
 }

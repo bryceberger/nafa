@@ -233,7 +233,7 @@ impl Backend for Device {
             Data::Tx(tdi) | Data::TxRx(tdi) => {
                 let read = matches!(data, Data::TxRx(_));
                 let read_cmd = if read { DO_READ | READ_NEG } else { 0 };
-                let cmd = read_cmd | DO_WRITE | LSB;
+                let cmd = read_cmd | DO_WRITE | WRITE_NEG | LSB;
 
                 let (tdi, last) = match (after, tdi.split_last()) {
                     (Some(_), Some((l, data))) => (data, Some(*l)),
@@ -399,7 +399,7 @@ fn shift_reads(mut buf: &mut [u8], reads: &[Read]) {
                 buf = rest;
             }
             Read::ExtraBit => {
-                *last_byte = buf[0];
+                *last_byte = *last_byte >> 1 | buf[0] & 0x80;
                 buf = &mut buf[1..];
             }
         }
