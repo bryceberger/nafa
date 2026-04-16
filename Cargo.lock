@@ -867,6 +867,7 @@ dependencies = [
  "facet",
  "futures-io",
  "futures-lite",
+ "hex",
  "nusb",
  "smol",
  "strum",

@@ -106,7 +106,7 @@ fn get_mpsse_clock(freq: u32) -> (u8, u16) {
 }
 
 #[rustfmt::skip]
-mod flags {
+pub mod flags {
     pub const WRITE_NEG : u8 = 0x01;   // Write TDI/DO on negative TCK/SK edge
     pub const BITMODE   : u8 = 0x02;   // Write bits, not bytes
     pub const READ_NEG  : u8 = 0x04;   // Sample TDO/DI on negative TCK/SK edge

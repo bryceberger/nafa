@@ -5,6 +5,9 @@ license.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "decode_ftdi"
+
 [dependencies]
 async-trait = "0.1.89"
 bitreader = "0.3.11"
@@ -13,6 +16,7 @@ eyre.workspace = true
 facet.workspace = true
 futures-io = "0.3"
 futures-lite = "2.6.1"
+hex.workspace = true
 nusb.workspace = true
 smol.workspace = true
 strum = { workspace = true, features = ["derive"] }
