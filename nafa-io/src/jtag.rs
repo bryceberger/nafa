@@ -64,7 +64,7 @@ impl From<IdCode> for u32 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 #[repr(u8)]
 pub enum State {
     TestLogicReset,
@@ -120,6 +120,11 @@ impl Path {
     pub const RESET: Self = Self { path: 0xff, len: 5 };
     /// Transition to RTI, from any state
     pub const IDLE: Self = Self { path: 0x3e, len: 6 };
+
+    pub const fn from_clocked(path: u8, len: u8) -> Self {
+        let path = path.reverse_bits() >> (8 - len);
+        Self { path, len }
+    }
 
     pub const fn as_clocked(self) -> u8 {
         self.path.reverse_bits() >> (8 - self.len)
