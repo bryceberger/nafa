@@ -15,7 +15,9 @@ for {set idx 0} {$idx < $len} {set idx [expr $idx + $parallel_lookup]} {
     foreach idcode $is part $ps {
         if {[info exists idcodes($idcode)]} {} else {
             set idcodes($idcode) $part
-            puts "$idcode $part"
+            set irlen [expr [get_property slrs $part] * 6]
+            set device [get_property device $part]
+            puts "$idcode $irlen $device $part"
         }
     }
 }
