@@ -8,7 +8,7 @@ data := \
 
 vivado := vivado -nolog -nojou -notrace -mode batch -source make.tcl -tclargs
 
-.SECONDARY: generated/readback/ generated/vivado/
+.SECONDARY:
 
 generated/%/:
 	mkdir -p $@
