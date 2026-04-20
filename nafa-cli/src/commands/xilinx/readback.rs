@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use eyre::Result;
+use eyre::{OptionExt as _, Result};
 use nafa_io::units::Bytes;
 use nafa_xilinx::Controller;
 
@@ -15,6 +15,7 @@ pub async fn run(
     args: Args,
 ) -> Result<Option<Box<dyn FnOnce()>>> {
     let len = cont.info().readback;
+    let len = len.ok_or_eyre("unsupported device for readback")?;
 
     if let Some(pb) = pb {
         pb.set_length(Bytes::from(len).0 as _);

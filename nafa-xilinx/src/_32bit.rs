@@ -200,6 +200,9 @@ pub async fn program(mut cont: Controller<'_>, data: &[u8]) -> Result<ProgramSta
 
 pub async fn readback(cont: Controller<'_>, len: Bytes<usize>) -> Result<&[u8]> {
     use self::registers::{Addr, OpCode, type2};
+
+    let num_slr = cont.info().slr;
+
     let readback = [
         Type1::SYNC,
         Type1::NOOP,
@@ -230,9 +233,9 @@ pub async fn readback(cont: Controller<'_>, len: Bytes<usize>) -> Result<&[u8]> 
     // going out of the `DR` side of JTAG makes the fpga just drop all further data.
 
     let commands = [
-        Command::ir(commands::CFG_IN as _),
+        Command::ir(shifted(commands::CFG_IN, num_slr, 0)),
         Command::dr_tx(readback),
-        Command::ir(commands::CFG_OUT as _),
+        Command::ir(shifted(commands::CFG_OUT, num_slr, 0)),
         Command::dr_rx_with_notification(len),
     ];
 
