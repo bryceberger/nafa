@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 
-use nafa_io::{
-    Controller,
-    devices::{Specific, Xilinx32Info},
-};
+use eyre::Result;
+use nafa_xilinx::_32bit::{bbram, nky};
+use nafa_xilinx::Controller;
 
 #[derive(clap::Args)]
 #[group(required = true, multiple = false)]
@@ -25,12 +24,8 @@ pub struct Args {
     pub dpa: Option<nafa_xilinx::_32bit::bbram::Dpa>,
 }
 
-pub async fn run(cont: &mut Controller, opts: Args) -> Result<(), eyre::Error> {
-    use nafa_xilinx::_32bit::{bbram, nky};
-    let num_slr = match cont.info().specific {
-        Specific::Xilinx32(Xilinx32Info { slr, .. }) => slr,
-        _ => return Err(eyre::eyre!("can only program bbram for xilinx device")),
-    };
+pub async fn run(cont: Controller<'_>, opts: Args) -> Result<()> {
+    let num_slr = cont.info().slr;
     let keys = if let Some(path) = opts.key_source.nky {
         nky::Nky::parse(&smol::fs::read_to_string(path).await?)?.keys
     } else {

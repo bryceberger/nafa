@@ -19,6 +19,18 @@ pub enum Specific {
     Intel,
 }
 
+pub trait GetSpecific<T> {
+    fn get(&self) -> Option<&T>;
+}
+impl GetSpecific<Xilinx32Info> for Specific {
+    fn get(&self) -> Option<&Xilinx32Info> {
+        match self {
+            Specific::Xilinx32(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Xilinx32Info {
     pub family: Xilinx32Family,

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use nafa_io::Controller;
+use eyre::Result;
+use nafa_xilinx::Controller;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -8,10 +9,10 @@ pub struct Args {
 }
 
 pub async fn run(
-    cont: &mut Controller,
+    cont: Controller<'_>,
     pb: Option<&indicatif::ProgressBar>,
     args: Args,
-) -> Result<Option<Box<dyn FnOnce()>>, eyre::Error> {
+) -> Result<Option<Box<dyn FnOnce()>>> {
     let mut data = std::fs::read(&args.input_file)?;
     for d in &mut data {
         *d = d.reverse_bits();

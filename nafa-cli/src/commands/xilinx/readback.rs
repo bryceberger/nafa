@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use nafa_io::{Controller, devices::Specific, units::Bytes};
+use eyre::Result;
+use nafa_io::units::Bytes;
+use nafa_xilinx::Controller;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -8,20 +10,17 @@ pub struct Args {
 }
 
 pub async fn run(
-    cont: &mut Controller,
+    cont: Controller<'_>,
     pb: Option<&indicatif::ProgressBar>,
     args: Args,
-) -> Result<Option<Box<dyn FnOnce()>>, eyre::Error> {
-    let data = match &cont.info().specific {
-        Specific::Unknown | Specific::Intel => todo!(),
-        Specific::Xilinx32(info) => {
-            let len = info.readback.into();
-            if let Some(pb) = pb {
-                pb.set_length(Bytes::from(info.readback).0 as _)
-            }
-            nafa_xilinx::_32bit::readback(cont, len).await?
-        }
-    };
+) -> Result<Option<Box<dyn FnOnce()>>> {
+    let len = cont.info().readback;
+
+    if let Some(pb) = pb {
+        pb.set_length(Bytes::from(len).0 as _);
+    }
+
+    let data = nafa_xilinx::_32bit::readback(cont, len.into()).await?;
     std::fs::write(args.output_file, data)?;
     Ok(None)
 }

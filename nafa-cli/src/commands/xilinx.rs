@@ -1,4 +1,4 @@
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use nafa_io::Controller;
 
 mod info;
@@ -28,6 +28,9 @@ pub async fn run(
     command: Command,
 ) -> Result<Option<Box<dyn FnOnce()>>> {
     let no_action = |()| None;
+    let cont = cont
+        .typed()
+        .ok_or_eyre("cannot call xilinx method with non-xilinx active device")?;
     match command {
         Command::Info(args) => info::run(cont, args).await.map(no_action),
         Command::Xadc(args) => xadc::run(cont, args).await.map(no_action),

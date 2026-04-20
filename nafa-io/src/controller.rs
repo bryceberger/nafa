@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    marker::PhantomData,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -9,7 +10,7 @@ use eyre::{Result, eyre};
 use crate::{
     Backend, Buffer, ScratchBuffer, ShortHex,
     backend::Data,
-    devices::DeviceInfo,
+    devices::{DeviceInfo, GetSpecific},
     jtag::{IdCode, PATHS, Path, State},
     units::{Bits, Bytes},
 };
@@ -38,6 +39,25 @@ pub struct Controller {
     after: Vec<(IdCode, DeviceInfo)>,
     notify: Ptr<AtomicUsize>,
     buf: ScratchBuffer,
+}
+
+pub struct TypedController<'a, T>(&'a mut Controller, PhantomData<T>);
+impl<'a, T> TypedController<'a, T>
+where
+    crate::devices::Specific: GetSpecific<T>,
+{
+    pub fn borrow(&mut self) -> &mut Controller {
+        &mut *self.0
+    }
+    pub fn consume(self) -> &'a mut Controller {
+        self.0
+    }
+    pub fn reborrow(&mut self) -> TypedController<'_, T> {
+        TypedController(&mut *self.0, PhantomData)
+    }
+    pub fn info(&self) -> &T {
+        self.0.info().specific.get().unwrap()
+    }
 }
 
 fn max_possible_combined_irlen(ircapture: &[u8]) -> Bits<usize> {
@@ -298,6 +318,17 @@ impl Controller {
             after,
             notify: Ptr(std::ptr::null()),
         })
+    }
+
+    pub fn typed<T>(&mut self) -> Option<TypedController<'_, T>>
+    where
+        crate::devices::Specific: GetSpecific<T>,
+    {
+        if self.info().specific.get().is_some() {
+            Some(TypedController(self, PhantomData))
+        } else {
+            None
+        }
     }
 
     pub fn info(&self) -> &DeviceInfo {

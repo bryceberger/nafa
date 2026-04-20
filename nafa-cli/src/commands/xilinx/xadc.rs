@@ -1,19 +1,15 @@
-use nafa_io::Controller;
+use eyre::Result;
+use nafa_xilinx::_32bit::drp::{Addr, Cmd, Command, Transfer};
+use nafa_xilinx::Controller;
 
 #[derive(clap::Args)]
 pub struct Args {}
 
-pub async fn run(cont: &mut Controller, _args: Args) -> Result<(), eyre::Error> {
-    use nafa_io::devices::Specific as S;
-    use nafa_xilinx::_32bit::drp::{Addr, Cmd, Command, Transfer};
+pub async fn run(mut cont: Controller<'_>, _args: Args) -> Result<()> {
+    let family = cont.info().family;
 
-    let family = match &cont.info().specific {
-        S::Xilinx32(info) => info.family,
-        _ => unreachable!(),
-    };
-
-    println!("idcode: {:04X}", cont.idcode().code());
-    println!("  name: {}", cont.info().name);
+    println!("idcode: {:04X}", cont.borrow().idcode().code());
+    println!("  name: {}", cont.borrow().info().name);
 
     let c = |addr| Command {
         cmd: Cmd::Read,
@@ -30,7 +26,7 @@ pub async fn run(cont: &mut Controller, _args: Args) -> Result<(), eyre::Error> 
         c(Addr::VRefN),
         c(Addr::VccBram),
     ];
-    let xadc_regs = nafa_xilinx::_32bit::read_xadc(cont, 0, regs).await?;
+    let xadc_regs = nafa_xilinx::_32bit::read_xadc(cont, regs).await?;
 
     let show = |name: &str, addr: Addr, val: u16, unit: &str| {
         const PREC: usize = 3;

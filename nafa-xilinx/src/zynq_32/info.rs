@@ -1,6 +1,5 @@
 use eyre::Result;
 use facet::Facet;
-use nafa_io::Controller;
 
 use super::{
     read_device_register_word as device_register, read_jtag_register_sized as jtag_register,
@@ -10,7 +9,7 @@ use crate::{
         info::{Registers, RegistersPerSlr},
         registers::Addr,
     },
-    Read,
+    Controller, Read,
     zynq_32::commands,
 };
 
@@ -42,38 +41,38 @@ pub struct ZPJtag {
 }
 
 impl Read for ZP {
-    async fn read(cont: &mut Controller) -> Result<Self> {
+    async fn read(mut cont: Controller<'_>) -> Result<Self> {
         let jtag = ZPJtag {
-            idcode_ps: *jtag_register(cont, commands::IDCODE).await?,
-            idcode_pl: *jtag_register(cont, commands::IDCODE_PL).await?,
-            idcode_pspl: *jtag_register(cont, commands::IDCODE_PSPL).await?,
-            usercode: *jtag_register(cont, commands::USERCODE).await?,
-            jtag_status: *jtag_register(cont, commands::JTAG_STATUS).await?,
-            jstatus: *jtag_register(cont, commands::JSTATUS).await?,
-            xsc_dna: *jtag_register(cont, commands::XSC_DNA).await?,
-            fuse_key: *jtag_register(cont, commands::FUSE_KEY).await?,
-            fuse_dna: *jtag_register(cont, commands::FUSE_DNA).await?,
-            fuse_cntl: *jtag_register(cont, commands::FUSE_CNTL).await?,
-            fuse_user_ps: *jtag_register(cont, commands::FUSE_USER_PS).await?,
-            user1: *jtag_register(cont, commands::USER1).await?,
-            user2: *jtag_register(cont, commands::USER2).await?,
-            user3: *jtag_register(cont, commands::USER3).await?,
-            user4: *jtag_register(cont, commands::USER4).await?,
-            error_status: *jtag_register(cont, commands::ERROR_STATUS).await?,
+            idcode_ps: *jtag_register(cont.reborrow(), commands::IDCODE).await?,
+            idcode_pl: *jtag_register(cont.reborrow(), commands::IDCODE_PL).await?,
+            idcode_pspl: *jtag_register(cont.reborrow(), commands::IDCODE_PSPL).await?,
+            usercode: *jtag_register(cont.reborrow(), commands::USERCODE).await?,
+            jtag_status: *jtag_register(cont.reborrow(), commands::JTAG_STATUS).await?,
+            jstatus: *jtag_register(cont.reborrow(), commands::JSTATUS).await?,
+            xsc_dna: *jtag_register(cont.reborrow(), commands::XSC_DNA).await?,
+            fuse_key: *jtag_register(cont.reborrow(), commands::FUSE_KEY).await?,
+            fuse_dna: *jtag_register(cont.reborrow(), commands::FUSE_DNA).await?,
+            fuse_cntl: *jtag_register(cont.reborrow(), commands::FUSE_CNTL).await?,
+            fuse_user_ps: *jtag_register(cont.reborrow(), commands::FUSE_USER_PS).await?,
+            user1: *jtag_register(cont.reborrow(), commands::USER1).await?,
+            user2: *jtag_register(cont.reborrow(), commands::USER2).await?,
+            user3: *jtag_register(cont.reborrow(), commands::USER3).await?,
+            user4: *jtag_register(cont.reborrow(), commands::USER4).await?,
+            error_status: *jtag_register(cont.reborrow(), commands::ERROR_STATUS).await?,
         };
         let registers = Registers {
             slrs: vec![RegistersPerSlr {
-                ctl0: device_register(cont, Addr::Ctl0).await?,
-                stat: device_register(cont, Addr::Stat).await?,
-                cor0: device_register(cont, Addr::Cor0).await?,
-                idcode: device_register(cont, Addr::Idcode).await?,
-                axss: device_register(cont, Addr::Axss).await?,
-                cor1: device_register(cont, Addr::Cor1).await?,
-                wbstar: device_register(cont, Addr::Wbstar).await?,
-                timer: device_register(cont, Addr::Timer).await?,
-                bootsts: device_register(cont, Addr::Bootsts).await?,
-                ctl1: device_register(cont, Addr::Ctl1).await?,
-                bspi: device_register(cont, Addr::Bspi).await?,
+                ctl0: device_register(cont.reborrow(), Addr::Ctl0).await?,
+                stat: device_register(cont.reborrow(), Addr::Stat).await?,
+                cor0: device_register(cont.reborrow(), Addr::Cor0).await?,
+                idcode: device_register(cont.reborrow(), Addr::Idcode).await?,
+                axss: device_register(cont.reborrow(), Addr::Axss).await?,
+                cor1: device_register(cont.reborrow(), Addr::Cor1).await?,
+                wbstar: device_register(cont.reborrow(), Addr::Wbstar).await?,
+                timer: device_register(cont.reborrow(), Addr::Timer).await?,
+                bootsts: device_register(cont.reborrow(), Addr::Bootsts).await?,
+                ctl1: device_register(cont.reborrow(), Addr::Ctl1).await?,
+                bspi: device_register(cont.reborrow(), Addr::Bspi).await?,
             }],
         };
         Ok(Self { jtag, registers })

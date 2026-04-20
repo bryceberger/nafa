@@ -1,32 +1,36 @@
 use eyre::Result;
 use nafa_io::{
-    Command, Controller,
+    Command,
     devices::Xilinx32Family,
     units::{Bits, Bytes},
 };
 
-use crate::_32bit::{commands, commands::duplicated, crc::Crc};
+use crate::{
+    _32bit::{commands, commands::duplicated, crc::Crc},
+    Controller,
+};
 
-pub async fn program_key(cont: &mut Controller, keys: &[[u8; 32]], dpa: Option<Dpa>) -> Result<()> {
-    let info = match &cont.info().specific {
-        nafa_io::devices::Specific::Xilinx32(info) => info,
-        _ => panic!("xilinx bbram programming called with non-xilinx active device"),
-    };
+pub async fn program_key(
+    mut cont: Controller<'_>,
+    keys: &[[u8; 32]],
+    dpa: Option<Dpa>,
+) -> Result<()> {
     assert_eq!(
-        usize::from(info.slr),
+        usize::from(cont.info().slr),
         keys.len(),
         "must give one key per slr in device"
     );
 
-    let has_crc = !matches!(info.family, Xilinx32Family::S7);
+    let has_crc = !matches!(cont.info().family, Xilinx32Family::S7);
 
     let ctrl_word = ctrl_word(dpa, false);
 
-    cont.run([
-        Command::ir(duplicated(commands::JPROGRAM)),
-        Command::ir(duplicated(commands::ISC_NOOP)),
-    ])
-    .await?;
+    cont.borrow()
+        .run([
+            Command::ir(duplicated(commands::JPROGRAM)),
+            Command::ir(duplicated(commands::ISC_NOOP)),
+        ])
+        .await?;
     smol::Timer::after(std::time::Duration::from_millis(100)).await;
 
     let mut crc_correct = true;
@@ -38,7 +42,7 @@ pub async fn program_key(cont: &mut Controller, keys: &[[u8; 32]], dpa: Option<D
         let program = duplicated(commands::ISC_PROGRAM);
 
         #[rustfmt::skip]
-        cont.run([
+        cont.borrow().run([
             Command::combined_ir_dr_tx_bits(enable, 0x15, Bits(5)),
 
             Command::ir(program_key),
@@ -57,14 +61,15 @@ pub async fn program_key(cont: &mut Controller, keys: &[[u8; 32]], dpa: Option<D
         ]).await?;
 
         if has_crc {
-            crc_correct = check_crc(cont, ctrl_word, key).await?;
+            crc_correct = check_crc(cont.reborrow(), ctrl_word, key).await?;
             if !crc_correct {
                 break;
             }
         }
     }
 
-    cont.run([Command::ir(duplicated(commands::ISC_DISABLE)), Command::dr_tx(&[0xff; 4])])
+    cont.borrow()
+        .run([Command::ir(duplicated(commands::ISC_DISABLE)), Command::dr_tx(&[0xff; 4])])
         .await?;
 
     if crc_correct {
@@ -74,7 +79,7 @@ pub async fn program_key(cont: &mut Controller, keys: &[[u8; 32]], dpa: Option<D
     }
 }
 
-async fn check_crc(cont: &mut Controller, ctrl_word: u32, key: &[u8; 32]) -> Result<bool> {
+async fn check_crc(mut cont: Controller<'_>, ctrl_word: u32, key: &[u8; 32]) -> Result<bool> {
     let expected = crc(ctrl_word, key);
     let expected_bytes = expected.to_le_bytes();
 
@@ -83,7 +88,10 @@ async fn check_crc(cont: &mut Controller, ctrl_word: u32, key: &[u8; 32]) -> Res
     let readback = [Command::ir(duplicated(commands::ISC_READ)), Command::dr_rx(Bytes(5))];
     let readback = std::iter::repeat_n(readback, 10).flatten();
 
-    let data = cont.run(program.into_iter().chain(readback)).await?;
+    let data = cont
+        .borrow()
+        .run(program.into_iter().chain(readback))
+        .await?;
 
     for chunk in data.as_chunks::<5>().0 {
         let read =
