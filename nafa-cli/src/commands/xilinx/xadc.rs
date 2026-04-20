@@ -1,6 +1,8 @@
 use eyre::Result;
-use nafa_xilinx::_32bit::drp::{Addr, Cmd, Command, Transfer};
-use nafa_xilinx::Controller;
+use nafa_xilinx::{
+    _32bit::drp::{Addr, Cmd, Command, Transfer},
+    Controller,
+};
 
 #[derive(clap::Args)]
 pub struct Args {}
@@ -31,7 +33,7 @@ pub async fn run(mut cont: Controller<'_>, _args: Args) -> Result<()> {
     let show = |name: &str, addr: Addr, val: u16, unit: &str| {
         const PREC: usize = 3;
         match addr.transfer(family) {
-            Transfer::None | Transfer::Unknown => println!("{name}: {val:04X}"),
+            Transfer::None => println!("{name}: {val:04X}"),
             Transfer::Exactly(f) => println!("{name}: {val:04X} => {:.PREC$}{unit}", f(val)),
             Transfer::OneOf(many) => {
                 let mut it = many.iter();

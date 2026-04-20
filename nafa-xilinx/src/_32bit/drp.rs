@@ -232,7 +232,6 @@ pub enum Addr {
 
 pub enum Transfer {
     None,
-    Unknown,
     Exactly(fn(u16) -> f32),
     OneOf(&'static [fn(u16) -> f32]),
 }
@@ -293,29 +292,26 @@ pub fn temperature(family: Family) -> Transfer {
             |d| linear_scale_10(d, -273.8195, 502.9098 / _2_10), // sysmone1, external ref
             |d| linear_scale_10(d, -273.6777, 501.3743 / _2_10), // sysmone1, internal ref
         ]),
-        Family::UP | Family::ZP => Transfer::OneOf(&[
+        Family::UP => Transfer::OneOf(&[
             |d| linear_scale_10(d, -273.8195, 502.9098 / _2_10), // sysmone1, external ref
             |d| linear_scale_10(d, -273.6777, 501.3743 / _2_10), // sysmone1, internal ref
             |d| linear_scale_10(d, -279.4266, 507.5921 / _2_10), // sysmone4, external ref
             |d| linear_scale_10(d, -280.2309, 509.3141 / _2_10), // sysmone4, internal ref
         ]),
-        Family::Z7 => Transfer::Unknown,
     }
 }
 
 pub fn power_supply(family: Family) -> Transfer {
     match family {
         Family::S7 => Transfer::Exactly(power_supply_s7),
-        Family::US | Family::UP | Family::ZP => Transfer::Exactly(power_supply_us),
-        Family::Z7 => Transfer::Unknown,
+        Family::US | Family::UP => Transfer::Exactly(power_supply_us),
     }
 }
 
 pub fn adc(family: Family) -> Transfer {
     match family {
         Family::S7 => Transfer::OneOf(&[adc_unipolar_s7, adc_bipolar_s7]),
-        Family::US | Family::UP | Family::ZP => Transfer::OneOf(&[adc_unipolar_us, adc_bipolar_us]),
-        Family::Z7 => Transfer::Unknown,
+        Family::US | Family::UP => Transfer::OneOf(&[adc_unipolar_us, adc_bipolar_us]),
     }
 }
 

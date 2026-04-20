@@ -17,13 +17,11 @@ trait Read: Sized {
 }
 
 pub async fn read(cont: Controller<'_>) -> Result<XilinxInfo> {
-    use nafa_io::devices::{Xilinx32Family as F, Xilinx32Info as I};
-    match cont.info() {
-        I { family: F::S7, .. } => Ok(XilinxInfo::S7(_32bit::info::S7::read(cont).await?)),
-        I { family: F::US, .. } => Ok(XilinxInfo::US(_32bit::info::US::read(cont).await?)),
-        I { family: F::UP, .. } => Ok(XilinxInfo::UP(_32bit::info::UP::read(cont).await?)),
-        I { family: F::ZP, .. } => Ok(XilinxInfo::ZP(zynq_32::info::ZP::read(cont).await?)),
-        I { family: F::Z7, .. } => Err(eyre::eyre!("unsupported device")),
+    use nafa_io::devices::Xilinx32Family as F;
+    match cont.info().family {
+        F::S7 => Ok(XilinxInfo::S7(_32bit::info::S7::read(cont).await?)),
+        F::US => Ok(XilinxInfo::US(_32bit::info::US::read(cont).await?)),
+        F::UP => Ok(XilinxInfo::UP(_32bit::info::UP::read(cont).await?)),
     }
 }
 
