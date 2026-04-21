@@ -1,25 +1,14 @@
-//! Utilities to read from Zynq devices.
-//!
-//! These are _almost_ the same as the rest of the devices. However, they have
-//! an IRLEN of 12 instead of 6 --- there's a processor and FPGA stuck together
-//! acting as a single device.
-
 use eyre::Result;
 use nafa_io::{
     Command,
     units::{Bytes, Words32},
 };
 
-use crate::{
-    _32bit::{
-        bitstream_to_wire_order, from_wire_order,
-        registers::{Addr, OpCode, Type1},
-    },
-    Controller,
+use super::{Controller, commands};
+use crate::_32bit::{
+    bitstream_to_wire_order, from_wire_order,
+    registers::{Addr, OpCode, Type1},
 };
-
-pub mod commands;
-pub mod info;
 
 pub async fn read_device_register(cont: Controller<'_>, reg: Type1) -> Result<&[u8]> {
     let tiny_bitstream =
@@ -36,13 +25,13 @@ pub async fn read_device_register(cont: Controller<'_>, reg: Type1) -> Result<&[
         .await
 }
 
-async fn read_device_register_word(cont: Controller<'_>, addr: Addr) -> Result<u32> {
+pub(crate) async fn read_device_register_word(cont: Controller<'_>, addr: Addr) -> Result<u32> {
     let data = read_device_register_sized(cont, addr).await?;
     let data = from_wire_order(*data);
     Ok(data)
 }
 
-async fn read_device_register_sized<const N: usize>(
+pub(crate) async fn read_device_register_sized<const N: usize>(
     cont: Controller<'_>,
     addr: Addr,
 ) -> Result<&[u8; N]> {
@@ -56,13 +45,17 @@ async fn read_device_register_sized<const N: usize>(
         })
 }
 
-async fn read_jtag_register(cont: Controller<'_>, inst: u32, len: Bytes<usize>) -> Result<&[u8]> {
+pub(crate) async fn read_jtag_register(
+    cont: Controller<'_>,
+    inst: u32,
+    len: Bytes<usize>,
+) -> Result<&[u8]> {
     cont.consume()
         .run([Command::ir(inst), Command::dr_rx(len)])
         .await
 }
 
-async fn read_jtag_register_sized<const N: usize>(
+pub(crate) async fn read_jtag_register_sized<const N: usize>(
     cont: Controller<'_>,
     inst: u32,
 ) -> Result<&[u8; N]> {

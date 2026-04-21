@@ -1,12 +1,33 @@
 use eyre::Result;
 use facet::Facet;
+use nafa_io::devices::Xilinx32Family;
 
-use super::{
-    commands, read_device_register_word as device_register,
-    read_jtag_register_duplicated as jtag_duplicated, read_jtag_register_master as jtag_master,
-    read_jtag_register_shifted as jtag_shifted, registers::Addr,
+use crate::_32bit::{
+    Controller, commands,
+    io_utils::{
+        read_device_register_word as device_register,
+        read_jtag_register_duplicated as jtag_duplicated, read_jtag_register_master as jtag_master,
+        read_jtag_register_shifted as jtag_shifted,
+    },
+    registers::Addr,
 };
-use crate::{Controller, Read};
+
+pub async fn run(cont: Controller<'_>) -> Result<XilinxInfo> {
+    match cont.info().family {
+        Xilinx32Family::S7 => Ok(XilinxInfo::S7(S7::read(cont).await?)),
+        Xilinx32Family::US => Ok(XilinxInfo::US(US::read(cont).await?)),
+        Xilinx32Family::UP => Ok(XilinxInfo::UP(UP::read(cont).await?)),
+    }
+}
+
+#[repr(C)]
+#[derive(Facet)]
+#[facet(tag = "family", content = "data")]
+pub enum XilinxInfo {
+    S7(S7),
+    US(US),
+    UP(UP),
+}
 
 #[derive(Facet)]
 pub struct S7 {
@@ -98,7 +119,7 @@ pub struct RegistersPerSlr {
     pub bspi: u32,
 }
 
-impl Read for S7 {
+impl S7 {
     async fn read(mut cont: Controller<'_>) -> Result<Self> {
         let jtag = S7Jtag {
             device: S7JtagPerDevice {
@@ -124,7 +145,7 @@ impl Read for S7 {
     }
 }
 
-impl Read for US {
+impl US {
     async fn read(mut cont: Controller<'_>) -> Result<Self> {
         let jtag = USJtag {
             device: read_us_jtag_device(cont.reborrow()).await?,
@@ -135,7 +156,7 @@ impl Read for US {
     }
 }
 
-impl Read for UP {
+impl UP {
     async fn read(mut cont: Controller<'_>) -> Result<Self> {
         let jtag = USJtag {
             device: read_us_jtag_device(cont.reborrow()).await?,

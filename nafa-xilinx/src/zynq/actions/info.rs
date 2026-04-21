@@ -1,16 +1,17 @@
 use eyre::Result;
 use facet::Facet;
 
-use super::{
-    read_device_register_word as device_register, read_jtag_register_sized as jtag_register,
-};
 use crate::{
     _32bit::{
-        info::{Registers, RegistersPerSlr},
+        actions::info::{Registers, RegistersPerSlr},
         registers::Addr,
     },
-    Controller, Read,
-    zynq_32::commands,
+    zynq::{
+        Controller, commands,
+        io_utils::{
+            read_device_register_word as device_register, read_jtag_register_sized as jtag_register,
+        },
+    },
 };
 
 #[derive(Facet)]
@@ -40,8 +41,8 @@ pub struct ZPJtag {
     pub error_status: [u8; 16],
 }
 
-impl Read for ZP {
-    async fn read(mut cont: Controller<'_>) -> Result<Self> {
+impl ZP {
+    pub async fn read(mut cont: Controller<'_>) -> Result<Self> {
         let jtag = ZPJtag {
             idcode_ps: *jtag_register(cont.reborrow(), commands::IDCODE).await?,
             idcode_pl: *jtag_register(cont.reborrow(), commands::IDCODE_PL).await?,

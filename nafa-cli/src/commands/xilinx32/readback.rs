@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use eyre::{OptionExt as _, Result};
 use nafa_io::units::Bytes;
-use nafa_xilinx::Controller;
+use nafa_xilinx::_32bit::{Controller, actions};
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -21,7 +21,7 @@ pub async fn run(
         pb.set_length(Bytes::from(len).0 as _);
     }
 
-    let data = nafa_xilinx::_32bit::readback(cont, len.into()).await?;
+    let data = actions::readback::run(cont, len.into()).await?;
     std::fs::write(args.output_file, data)?;
     Ok(None)
 }

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use eyre::Result;
-use nafa_xilinx::Controller;
+use nafa_xilinx::_32bit::{Controller, actions};
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -21,7 +21,7 @@ pub async fn run(
         pb.set_length(data.len() as _)
     }
 
-    let stats = nafa_xilinx::_32bit::program(cont, &data).await?;
+    let stats = actions::program::run(cont, &data).await?;
 
     let digits = as_millis(stats.time_program)
         .max(as_millis(stats.time_shutdown))

@@ -26,6 +26,7 @@ pub const fn shifted(val: Shifted, num_slr: u8, active_slr: u8) -> u32 {
 
 #[repr(u8)]
 #[expect(non_camel_case_types)]
+#[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Clone, Copy)]
 #[rustfmt::skip]
 pub enum Duplicated {
@@ -50,6 +51,7 @@ pub enum Duplicated {
 
 #[repr(u8)]
 #[expect(non_camel_case_types)]
+#[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Clone, Copy)]
 #[rustfmt::skip]
 pub enum Master {
@@ -66,6 +68,7 @@ pub enum Master {
 
 #[repr(u8)]
 #[expect(non_camel_case_types)]
+#[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Clone, Copy)]
 #[rustfmt::skip]
 pub enum Shifted {

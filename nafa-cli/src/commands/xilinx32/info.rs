@@ -1,6 +1,5 @@
 use eyre::Result;
-use nafa_xilinx::Controller;
-use nafa_xilinx::read;
+use nafa_xilinx::_32bit::{Controller, actions};
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -20,6 +19,6 @@ pub async fn run(cont: Controller<'_>, args: Args) -> Result<()> {
         Ok(())
     }
 
-    let info = read(cont).await?;
+    let info = actions::info::run(cont).await?;
     print(info, args.pretty)
 }

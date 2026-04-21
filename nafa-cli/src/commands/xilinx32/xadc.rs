@@ -1,7 +1,7 @@
 use eyre::Result;
-use nafa_xilinx::{
-    _32bit::drp::{Addr, Cmd, Command, Transfer},
-    Controller,
+use nafa_xilinx::_32bit::{
+    Controller, actions,
+    drp::{Addr, Cmd, Command, Transfer},
 };
 
 #[derive(clap::Args)]
@@ -28,7 +28,7 @@ pub async fn run(mut cont: Controller<'_>, _args: Args) -> Result<()> {
         c(Addr::VRefN),
         c(Addr::VccBram),
     ];
-    let xadc_regs = nafa_xilinx::_32bit::read_xadc(cont, regs).await?;
+    let xadc_regs = actions::xadc::run(cont, regs).await?;
 
     let show = |name: &str, addr: Addr, val: u16, unit: &str| {
         const PREC: usize = 3;

@@ -19,6 +19,7 @@ impl Type1 {
 
 #[repr(u8)]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(unused)]
 pub enum OpCode {
     Noop = 0,
     Read = 1,
@@ -29,6 +30,7 @@ pub enum OpCode {
 
 #[repr(u16)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(unused)]
 pub enum Addr {
     Crc = 0,
     Far = 1,
@@ -71,7 +73,6 @@ impl Type1 {
         header | opcode | address | word_count
     }
 
-    pub const DUMMY: u32 = 0xffffffff;
     pub const SYNC: u32 = 0xaa995566;
     pub const NOOP: u32 = 0x20000000;
 }

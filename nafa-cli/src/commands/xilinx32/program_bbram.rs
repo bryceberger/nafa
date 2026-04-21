@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
 use eyre::Result;
-use nafa_xilinx::_32bit::{bbram, nky};
-use nafa_xilinx::Controller;
+use nafa_xilinx::_32bit::{Controller, actions, nky};
 
 #[derive(clap::Args)]
 #[group(required = true, multiple = false)]
@@ -21,7 +20,7 @@ pub struct Args {
     #[command(flatten)]
     pub key_source: BbramKeySource,
     #[command(flatten)]
-    pub dpa: Option<nafa_xilinx::_32bit::bbram::Dpa>,
+    pub dpa: Option<actions::bbram::Dpa>,
 }
 
 pub async fn run(cont: Controller<'_>, opts: Args) -> Result<()> {
@@ -39,6 +38,6 @@ pub async fn run(cont: Controller<'_>, opts: Args) -> Result<()> {
             keys.len()
         ));
     }
-    bbram::program_key(cont, &keys, opts.dpa).await?;
+    actions::bbram::program_key(cont, &keys, opts.dpa).await?;
     Ok(())
 }

@@ -5,10 +5,7 @@ use nafa_io::{
     units::{Bits, Bytes},
 };
 
-use crate::{
-    _32bit::{commands, commands::duplicated, crc::Crc},
-    Controller,
-};
+use crate::_32bit::{Controller, commands, commands::duplicated, crc::Crc};
 
 pub async fn program_key(
     mut cont: Controller<'_>,

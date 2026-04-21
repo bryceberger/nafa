@@ -2,6 +2,7 @@ pub use self::internal::*;
 
 // from xczu9eg_ffvc900.bsd
 #[rustfmt::skip]
+#[allow(unused)]
 mod internal {
     pub const IDCODE:       u32 = 0b_001001_001001; // PS IDCODE, DEVICE_ID reg
     pub const IDCODE_PL:    u32 = 0b_100100_100101; // PRIVATE, PL IDCODE, DEVICE_ID reg
