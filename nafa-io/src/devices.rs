@@ -15,6 +15,7 @@ pub struct DeviceInfo {
 #[derive(Clone, Debug)]
 pub enum Specific {
     Unknown,
+    Xilinx16(Xilinx16Info),
     Xilinx32(Xilinx32Info),
     XilinxZynq(XilinxZynqInfo),
     XilinxVersal(XilinxVersalInfo),
@@ -24,6 +25,16 @@ pub enum Specific {
 pub trait GetSpecific<T> {
     fn get(&self) -> Option<&T>;
 }
+
+impl GetSpecific<Xilinx16Info> for Specific {
+    fn get(&self) -> Option<&Xilinx16Info> {
+        match self {
+            Specific::Xilinx16(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
 impl GetSpecific<Xilinx32Info> for Specific {
     fn get(&self) -> Option<&Xilinx32Info> {
         match self {
@@ -32,6 +43,7 @@ impl GetSpecific<Xilinx32Info> for Specific {
         }
     }
 }
+
 impl GetSpecific<XilinxZynqInfo> for Specific {
     fn get(&self) -> Option<&XilinxZynqInfo> {
         match self {
@@ -49,6 +61,9 @@ impl GetSpecific<XilinxVersalInfo> for Specific {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct Xilinx16Info {}
 
 #[derive(Clone, Debug)]
 pub struct Xilinx32Info {
@@ -78,7 +93,8 @@ pub struct XilinxVersalInfo {}
 /// `HashMap`, to be passed to [`crate::Controller::new`].
 pub fn builtin() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
     [].into_iter()
-        .chain(xilinx())
+        .chain(xilinx_16())
+        .chain(xilinx_32())
         .chain(xilinx_zynq())
         .chain(xilinx_versal())
         .chain(intel())
@@ -107,7 +123,22 @@ fn intel() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
     DEVICES.iter().cloned()
 }
 
-fn xilinx() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
+fn xilinx_16() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
+    const fn info(idcode: u32, irlen: u8, name: &'static str) -> (IdCode, DeviceInfo) {
+        let info = DeviceInfo {
+            irlen: Bits(irlen),
+            name,
+            specific: Specific::Xilinx16(Xilinx16Info {}),
+        };
+        (id(idcode), info)
+    }
+
+    static DEVICES: &[(IdCode, DeviceInfo)] = &[info(0x4001093, 6, "xc6slx9")];
+
+    DEVICES.iter().cloned()
+}
+
+fn xilinx_32() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
     use Xilinx32Family as F;
 
     const fn get_family(x: u32) -> F {

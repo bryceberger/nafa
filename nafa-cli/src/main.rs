@@ -57,12 +57,15 @@ enum StandaloneCommand {
 #[derive(clap::Subcommand)]
 enum ControllerCommand {
     #[command(subcommand)]
+    Xilinx16(commands::xilinx16::Command),
+    #[command(subcommand)]
     Xilinx32(commands::xilinx32::Command),
 }
 
 impl ControllerCommand {
     fn wants_progress(&self) -> bool {
         match self {
+            Self::Xilinx16(command) => command.wants_progress(),
             Self::Xilinx32(command) => command.wants_progress(),
         }
     }
@@ -122,8 +125,9 @@ async fn run(
     cont: &mut Controller,
     pb: Option<&indicatif::ProgressBar>,
     command: ControllerCommand,
-) -> Result<Option<Box<dyn FnOnce()>>, eyre::Error> {
+) -> Result<Option<Box<dyn FnOnce()>>> {
     match command {
+        ControllerCommand::Xilinx16(cmd) => commands::xilinx16::run(cont, pb, cmd).await,
         ControllerCommand::Xilinx32(cmd) => commands::xilinx32::run(cont, pb, cmd).await,
     }
 }

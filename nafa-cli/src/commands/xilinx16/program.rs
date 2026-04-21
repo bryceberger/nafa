@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
 use eyre::Result;
-use nafa_xilinx::_32bit::{Controller, actions};
+use nafa_xilinx::_16bit::{Controller, actions};
 
 use crate::cli_helpers::as_millis;
 
 #[derive(clap::Args)]
 pub struct Args {
-    pub input_file: PathBuf,
+    input_file: PathBuf,
 }
 
 pub async fn run(
@@ -24,17 +24,14 @@ pub async fn run(
     }
 
     let stats = actions::program::run(cont, &data).await?;
-
     let digits = as_millis(stats.time_program)
-        .max(as_millis(stats.time_shutdown))
         .max(as_millis(stats.time_verify))
         .log10()
         .ceil() as usize;
     let width = digits + 4;
     Ok(Some(Box::new(move || {
-        println!("shutdown: {:>width$.3}ms", as_millis(stats.time_shutdown));
-        println!(" program: {:>width$.3}ms", as_millis(stats.time_program));
-        println!("  verify: {:>width$.3}ms", as_millis(stats.time_verify));
-        println!(" success: {}", stats.success);
+        println!("program: {:>width$.3}ms", as_millis(stats.time_program));
+        println!(" verify: {:>width$.3}ms", as_millis(stats.time_verify));
+        println!("success: {}", stats.success);
     })))
 }

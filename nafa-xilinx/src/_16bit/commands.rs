@@ -1,0 +1,34 @@
+#![allow(unused)]
+
+pub const EXTEST: u32 = 0b001111;
+pub const SAMPLE: u32 = 0b000001;
+pub const PRELOAD: u32 = 0b000001;
+pub const USER1: u32 = 0b000010;
+pub const USER2: u32 = 0b000011;
+pub const USER3: u32 = 0b011010;
+pub const USER4: u32 = 0b011011;
+pub const CFG_OUT: u32 = 0b000100;
+pub const CFG_IN: u32 = 0b000101;
+pub const INTEST: u32 = 0b000111;
+pub const USERCODE: u32 = 0b001000;
+pub const IDCODE: u32 = 0b001001;
+pub const HIGHZ: u32 = 0b001010;
+pub const JPROGRAM: u32 = 0b001011;
+pub const JSTART: u32 = 0b001100;
+pub const JSHUTDOWN: u32 = 0b001101;
+pub const BYPASS: u32 = 0b111111;
+pub const FUSE_UPDATE: u32 = 0b111010;
+pub const FUSE_KEY: u32 = 0b111011;
+pub const FUSE_OPTIONS: u32 = 0b111100;
+pub const FUSE_CNTL: u32 = 0b111101;
+pub const ISC_FUSE_READ: u32 = 0b110000;
+pub const ISC_FUSE_WRITE: u32 = 0b110001;
+pub const ISC_IOIMISR: u32 = 0b110010;
+pub const ISC_ENABLE: u32 = 0b010000;
+pub const ISC_PROGRAM: u32 = 0b010001;
+pub const ISC_PROGRAM_KEY: u32 = 0b010010;
+pub const ISC_ADDRESS_SHIFT: u32 = 0b010011;
+pub const ISC_NOOP: u32 = 0b010100;
+pub const ISC_READ: u32 = 0b010101;
+pub const ISC_DISABLE: u32 = 0b010110;
+pub const ISC_DNA: u32 = 0b010111;

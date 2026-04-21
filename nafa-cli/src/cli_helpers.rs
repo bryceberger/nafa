@@ -41,3 +41,8 @@ impl<const N: usize> FromStr for Hex<N> {
         Ok(Self(ret))
     }
 }
+
+pub fn as_millis(d: std::time::Duration) -> f32 {
+    const NANOS_PER_MILLI: u32 = 1_000_000;
+    (d.as_nanos() as f32) / (NANOS_PER_MILLI as f32)
+}

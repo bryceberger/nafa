@@ -10,6 +10,10 @@ pub struct Bytes<T>(pub T);
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Words16<T>(pub T);
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Words32<T>(pub T);
 
 impl<T> From<Bytes<T>> for Bits<T>
@@ -18,6 +22,15 @@ where
 {
     fn from(value: Bytes<T>) -> Self {
         Self(value.0 * 8)
+    }
+}
+
+impl<T> From<Words16<T>> for Bytes<T>
+where
+    T: Mul<usize, Output = T>,
+{
+    fn from(value: Words16<T>) -> Self {
+        Self(value.0 * 2)
     }
 }
 
@@ -61,6 +74,14 @@ impl<T> Bytes<T> {
     }
     pub fn into_<U: From<T>>(self) -> Bytes<U> {
         Bytes(self.0.into())
+    }
+}
+impl<T> Words16<T> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Words16<U> {
+        Words16(f(self.0))
+    }
+    pub fn into_<U: From<T>>(self) -> Words16<U> {
+        Words16(self.0.into())
     }
 }
 impl<T> Words32<T> {
