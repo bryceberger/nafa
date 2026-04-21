@@ -1,2 +1,2 @@
 pub mod flash;
-pub mod xilinx;
+pub mod xilinx32;
