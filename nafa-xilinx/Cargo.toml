@@ -5,9 +5,6 @@ license.workspace = true
 edition.workspace = true
 authors.workspace = true
 
-[[bin]]
-name = "generate_python"
-
 [dependencies]
 bitflags = "2.11.0"
 clap.workspace = true

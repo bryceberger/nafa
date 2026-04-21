@@ -2,10 +2,7 @@ use eyre::Result;
 use facet::Facet;
 use nafa_io::{controller::TypedController, devices::Xilinx32Info};
 
-use crate::{
-    _32bit::info::{S7, UP, US},
-    zynq_32::info::ZP,
-};
+use crate::_32bit::info::{S7, UP, US};
 
 pub mod _32bit;
 pub mod zynq_32;
@@ -32,5 +29,4 @@ pub enum XilinxInfo {
     S7(S7),
     US(US),
     UP(UP),
-    ZP(ZP),
 }
