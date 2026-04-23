@@ -3,16 +3,18 @@ use nafa_io::Controller;
 use nafa_xilinx::_16bit::actions;
 
 mod program;
+mod readback;
 
 #[derive(clap::Subcommand)]
 pub enum Command {
     Status,
     Program(program::Args),
+    Readback(readback::Args),
 }
 
 impl Command {
     pub fn wants_progress(&self) -> bool {
-        matches!(self, Command::Program { .. })
+        matches!(self, Command::Program { .. } | Command::Readback { .. })
     }
 }
 
@@ -44,5 +46,6 @@ pub async fn run(
             Ok(None)
         }
         Command::Program(args) => program::run(cont, pb, args).await,
+        Command::Readback(args) => readback::run(cont, pb, args).await,
     }
 }

@@ -90,3 +90,8 @@ pub const NOOP: u16 = 0x2000;
 pub const fn type1(op: OpCode, addr: Addr, len: Words16<u8>) -> u16 {
     0b001 << 13 | (op as u16) << 11 | (addr as u16) << 5 | (len.0 as u16) & 0b11111
 }
+
+/// Must be followed by two 16-bit words representing the length
+pub const fn type2(op: OpCode, addr: Addr) -> u16 {
+    0b010 << 13 | (op as u16) << 11 | (addr as u16) << 5
+}

@@ -2,7 +2,7 @@ use facet::Facet;
 
 use crate::{
     jtag::IdCode,
-    units::{Bits, Words32},
+    units::{Bits, Words16, Words32},
 };
 
 #[derive(Clone, Debug)]
@@ -63,7 +63,9 @@ impl GetSpecific<XilinxVersalInfo> for Specific {
 }
 
 #[derive(Clone, Debug)]
-pub struct Xilinx16Info {}
+pub struct Xilinx16Info {
+    pub readback: Words16<u32>,
+}
 
 #[derive(Clone, Debug)]
 pub struct Xilinx32Info {
@@ -124,16 +126,23 @@ fn intel() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
 }
 
 fn xilinx_16() -> impl Iterator<Item = (IdCode, DeviceInfo)> {
-    const fn info(idcode: u32, irlen: u8, name: &'static str) -> (IdCode, DeviceInfo) {
+    const fn info(
+        idcode: u32,
+        irlen: u8,
+        name: &'static str,
+        readback: u32,
+    ) -> (IdCode, DeviceInfo) {
         let info = DeviceInfo {
             irlen: Bits(irlen),
             name,
-            specific: Specific::Xilinx16(Xilinx16Info {}),
+            specific: Specific::Xilinx16(Xilinx16Info {
+                readback: Words16(readback),
+            }),
         };
         (id(idcode), info)
     }
 
-    static DEVICES: &[(IdCode, DeviceInfo)] = &[info(0x4001093, 6, "xc6slx9")];
+    static DEVICES: &[(IdCode, DeviceInfo)] = &[info(0x4001093, 6, "xc6slx9", 170157)];
 
     DEVICES.iter().cloned()
 }
