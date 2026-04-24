@@ -128,7 +128,7 @@ async fn run(
 ) -> Result<Option<Box<dyn FnOnce()>>, eyre::Error> {
     match command {
         ControllerCommand::Xilinx32(cmd) => commands::xilinx32::run(cont, pb, cmd).await,
-        ControllerCommand::Microchip(cmd) => commands::microchip::run(cont, cmd).await,
+        ControllerCommand::Microchip(cmd) => commands::microchip::run(cont, pb, cmd).await,
     }
 }
 

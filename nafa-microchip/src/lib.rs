@@ -2,7 +2,7 @@ use eyre::Result;
 use facet::Facet;
 use nafa_io::Controller;
 
-use crate::_32bit::info::PF;
+use crate::_32bit::{info::PF, program::run};
 
 pub mod _32bit;
 

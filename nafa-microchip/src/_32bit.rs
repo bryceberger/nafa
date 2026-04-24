@@ -11,6 +11,7 @@ use zerocopy::FromBytes;
 use crate::_32bit::info::Digests;
 
 pub mod info;
+pub mod program;
 
 pub struct Transition {
     pdr_sir: Option<nafa_io::jtag::Path>,
@@ -22,6 +23,8 @@ pub struct Transition {
     sir_pir: Option<nafa_io::jtag::Path>,
     sir_sdr: Option<nafa_io::jtag::Path>,
     pir_sdr: Option<nafa_io::jtag::Path>,
+    sir_rti: Option<nafa_io::jtag::Path>,
+    pdr_rti: Option<nafa_io::jtag::Path>,
 }
 static S: LazyLock<Transition> = LazyLock::new(|| Transition {
     pdr_sir: Some(PATHS[State::PauseDR][State::ShiftIR]),
@@ -33,6 +36,8 @@ static S: LazyLock<Transition> = LazyLock::new(|| Transition {
     sir_pir: Some(PATHS[State::ShiftIR][State::PauseIR]),
     sir_sdr: Some(PATHS[State::ShiftIR][State::ShiftDR]),
     pir_sdr: Some(PATHS[State::PauseIR][State::ShiftDR]),
+    sir_rti: Some(PATHS[State::ShiftIR][State::RunTestIdle]),
+    pdr_rti: Some(PATHS[State::PauseDR][State::RunTestIdle]),
 });
 
 async fn idcode<const N: usize>(b: &mut dyn Backend, buf: &mut ScratchBuffer) -> Result<[u8; N]> {
